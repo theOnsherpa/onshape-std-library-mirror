@@ -1,0 +1,187 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1977;
+export import(path : "onshape/std/common.fs", version : "1977.0");
+import(path : "b82bd38a9390b4dd3155b161", version : "25f259d811ce5137fa6d74ba");
+icon::import(path : "8bdc18f39193684e92096d36", version : "58ba26f097a21cf30a3b9bad");
+
+
+annotation { "Feature Type Name" : "Torus",
+        "Manipulator Change Function" : "manipulatorChangeFunction",
+        "Editing Logic Function" : "torusEditingLogic",
+        "Icon" : icon::BLOB_DATA}
+export const torusFeature = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        booleanStepTypePredicate(definition);
+
+        annotation { "Name" : "Locations", "Filter" : QueryFilterCompound.ALLOWS_VERTEX }
+        definition.locations is Query;
+
+        annotation { "Name" : "majorRadius radius" }
+        isLength(definition.majorRadius, TORUS_MAJOR_RADIUS_BOUNDS);
+
+        annotation { "Name" : "minorRadius radius" }
+        isLength(definition.minorRadius, NONNEGATIVE_LENGTH_BOUNDS);
+
+        booleanStepScopePredicate(definition);
+    }
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        const majorRadius = definition.majorRadius;
+
+        const minorMin = 0.01 * millimeter;
+        const minorMax = majorRadius - 0.01 * millimeter;
+        // const minorRadius = clamp(definition.minorRadius, minorMin, minorMax); // don't let the minor exceed the major
+        const minorRadius = definition.minorRadius;
+
+        definition.locations = isQueryEmpty(context, definition.locations) ? qOrigin(EntityType.BODY) : definition.locations; //if nothing is selected use the origin
+
+        forEachEntity(context, id + "torus", definition.locations, function(location is Query, id is Id) // iterate over each selection
+            {
+
+                const coordinateSystem = getCoordinateSystemFromLocation(context, location);
+
+                const sketchPlane = plane(coordinateSystem.origin, yAxis(coordinateSystem), coordinateSystem.xAxis);
+
+                const sectionSketch = newSketchOnPlane(context, id + "sectionSketch", { "sketchPlane" : sketchPlane });
+
+                skCircle(sectionSketch, "sectionCircle", {
+                            "center" : vector(majorRadius, 0 * inch),
+                            "radius" : minorRadius
+                        });
+
+                skSolve(sectionSketch);
+
+                opRevolve(context, id + "revolve1", {
+                            "entities" : qSketchRegion(id + "sectionSketch"),
+                            "axis" : line(coordinateSystem.origin, coordinateSystem.zAxis),
+                            "angleForward" : 360 * degree
+                        });
+
+                const torusBody = qCreatedBy(id + "revolve1")->qEntityFilter(EntityType.BODY);
+
+                var toDelete = qCreatedBy(id + "sectionSketch");
+
+
+                opDeleteBodies(context, id + "deleteBodies1", { "entities" : toDelete });
+
+            });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+        addTorusManipulators(context, id, {
+                    "location" : queryLast(context, definition.locations),
+                    "majorRadius" : majorRadius,
+                    "minorRadius" : minorRadius,
+                    "minorMin" : minorMin,
+                    "minorMax" : minorMax
+                });
+
+    });
+
+export function manipulatorChangeFunction(context is Context, definition is map, newManipulators is map) returns map
+{
+    if (newManipulators.minorManip is map)
+    {
+        definition.minorRadius = newManipulators.minorManip.offset;
+        return definition;
+    }
+    if (newManipulators.majorManip is map)
+    {
+        definition.majorRadius = newManipulators.majorManip.offset;
+        return definition;
+    }
+}
+
+
+/**
+ * @param def{{
+ * @field location {Query}: The point or mate connector of the torus to add manipulators to
+ * @field majorRadius {ValueWithUnits}: The majorRadius radius of the torus
+ * @field minorRadius {ValueWithUnits}: The minorRadius radius of the torus (i.e. the cross section of the profile)
+ * @field minorMin {ValueWithUnits}: The lower size limit of the cross section circle.
+ * @field minorMax {ValueWithUnits}: The maximum size limit of the cross section circle. It should be less than the majorRadius radius.
+ * }}
+ */
+export function addTorusManipulators(context is Context, id is Id, def is map)
+{
+    const coordinateSystem = getCoordinateSystemFromLocation(context, def.location);
+
+    var majorManip = linearManipulator({
+            "base" : coordinateSystem.origin,
+            "direction" : coordinateSystem.xAxis,
+            "offset" : def.majorRadius,
+        });
+
+    var minorManip = linearManipulator({
+            "base" : coordinateSystem.origin + coordinateSystem.xAxis * def.majorRadius,
+            "direction" : coordinateSystem.zAxis,
+            "offset" : def.minorRadius,
+            "minValue" : def.minorMin,
+            "maxValue" : def.minorMax,
+            "style" : ManipulatorStyleEnum.SECONDARY
+        });
+
+    addManipulators(context, id, { "minorManip" : minorManip, "majorManip" : majorManip });
+
+    const sectionSketchPlane = plane(coordinateSystem.origin, yAxis(coordinateSystem), coordinateSystem.xAxis);
+    const sectionSketch = newSketchOnPlane(context, id + "sectionSketch", { "sketchPlane" : sectionSketchPlane });
+    skCircle(sectionSketch, "circle1", { "center" : vector(def.majorRadius, 0 * inch), "radius" : def.minorRadius });
+    skSolve(sectionSketch);
+
+    const axisSketch = newSketchOnPlane(context, id + "axisSketch", { "sketchPlane" : plane(coordinateSystem) });
+
+    skCircle(axisSketch, "axisCircle", { "center" : vector(0, 0) * inch, "radius" : def.majorRadius });
+
+    skSolve(axisSketch);
+
+    const toPreview = qUnion([qCreatedBy(id + "sectionSketch"), qCreatedBy(id + "axisSketch")]);
+
+    addDebugEntities(context, toPreview->qEntityFilter(EntityType.EDGE), DebugColor.MAGENTA);
+    opDeleteBodies(context, id + "deleteBodies1", { "entities" : toPreview });
+
+}
+
+/**
+ * Takes a vertex or mate connector as input, and returns a coordinate system. If the input is a vertex, the coordinate system is aligned to the world axes.
+ */
+export function getCoordinateSystemFromLocation(context is Context, location is Query) returns map
+{
+    var coordinateSystem;
+    try silent
+    {
+        coordinateSystem = evMateConnector(context, { "mateConnector" : location });
+    }
+    catch (error)
+    {
+        const originPoint = evVertexPoint(context, { "vertex" : location });
+        coordinateSystem = coordSystem(originPoint, X_DIRECTION, Z_DIRECTION);
+    }
+
+    return coordinateSystem;
+}
+
+export function queryLast(context is Context, query is Query) returns Query
+{
+    const index = size(evaluateQuery(context, query));
+    return qNthElement(query, index - 1);
+}
+
+export function torusEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (definition.minorRadius >= (definition.majorRadius - 1e-6 * meter))
+    {
+        definition.minorRadius = definition.majorRadius - 1e-6 * meter;
+        return definition;
+    }
+
+}
