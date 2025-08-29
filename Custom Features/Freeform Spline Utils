@@ -1,0 +1,816 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+// Some code here is copied and slightly modified from the standard fit spline tool code: https://cad.onshape.com/documents/12312312345abcabcabcdeff/w/a855e4161c814f2e9ab3698a/e/6e8d96a622de0a7cfb5ddac1
+
+FeatureScript 1746;
+import(path : "onshape/std/geometry.fs", version : "1746.0");
+export import(path : "9f4c9835d8018ff7dbdb5683/ffaca39d1d22450f59e60d16/c60f4a6e12f07acee647a2a1", version : "198e65e227da4b79f32bd021");
+
+
+export enum freeformSplineCreationType
+{
+    Interpolate,
+    annotation { "Name" : "Control points" }
+    bSpline,
+    Polyline
+}
+
+export enum freeformSplineModeType
+{
+    annotation { "Name" : "Create" }
+    Create,
+
+    annotation { "Name" : "Insert" }
+    Insert,
+
+    annotation { "Name" : "Delete" }
+    Delete,
+}
+
+export function getFreeSplineThroughPointsDefinition(context is Context, id is Id, points is array, definition is map) returns map
+{
+    if (definition.closed)
+    {
+        if (size(points) < 3)
+        {
+            throw regenError(ErrorStringEnum.CLOSED_SPLINE_THREE_POINTS, ["vertices"]);
+        }
+    }
+
+    if (definition.oppositeDirectionStart)
+    {
+        definition.startMagnitude *= -1;
+    }
+
+    if (definition.oppositeDirectionEnd)
+    {
+        definition.endMagnitude *= -1;
+    }
+
+
+    // find the bounding box of an array of vectors (didn't use evBox3D because it wants a query)
+    var xArray = [];
+    var yArray = [];
+    var zArray = [];
+    for (var point in points)
+    {
+        xArray = append(xArray, point[0]);
+        yArray = append(yArray, point[1]);
+        zArray = append(zArray, point[2]);
+    }
+    const boundingBox = {
+            "minCorner" : vector(min(xArray), min(yArray), min(zArray)),
+            "maxCorner" : vector(max(xArray), max(yArray), max(zArray)),
+        };
+
+    const totalSpan = norm(boundingBox.maxCorner - boundingBox.minCorner);
+    // if (tolerantEquals(totalSpan, 0 * meter))
+    // {
+    //     throw regenError(ErrorStringEnum.FIT_SPLINE_REPEATED_POINT, ['vertices']);
+    // }
+
+    var startDerivative = undefined;
+    var endDerivative = undefined;
+    var start2ndDerivative = undefined;
+    var end2ndDerivative = undefined;
+
+    if (!definition.closed && size(points) > 1)
+    {
+        // The sum of the square roots of distances between interpolation points.
+        // Important since the server uses centripetal knots, and some knowledge of the parametrization is necessary
+        // to get the end conditions correct.
+        const sqrtDistance = getSumSqrtDistances(points);
+        const startCondition = getEndCondition(context, definition, points, totalSpan, sqrtDistance, true);
+        const endCondition = getEndCondition(context, definition, points, totalSpan, sqrtDistance, false);
+
+        // shows the end condition manips only if it's in create mode and interpolate style (I would love to find a way to get end conditions working for b-spline)
+        if (definition.mode != freeformSplineModeType.Insert && definition.creationType == freeformSplineCreationType.Interpolate)
+        {
+            addFitSplineManipulators(context, id, definition, startCondition, endCondition, points, totalSpan);
+        }
+
+        if (startCondition != undefined)
+        {
+            if (tolerantEquals(startCondition.magnitude, 0 * meter))
+            {
+                throw regenError(ErrorStringEnum.FIT_SPLINE_ZERO_START_MAGNITUDE, ['startMagnitude']);
+            }
+            try
+            {
+                startDerivative = startCondition.magnitude * startCondition.direction;
+                start2ndDerivative = startCondition.second;
+            }
+        }
+
+        if (endCondition != undefined)
+        {
+            if (tolerantEquals(endCondition.magnitude, 0 * meter))
+            {
+                throw regenError(ErrorStringEnum.FIT_SPLINE_ZERO_END_MAGNITUDE, ['endMagnitude']);
+            }
+            try
+            {
+                endDerivative = endCondition.direction * endCondition.magnitude;
+                end2ndDerivative = endCondition.second;
+            }
+        }
+    }
+    var fitSplineDefn = { "points" : points,
+        "startDerivative" : startDerivative,
+        "endDerivative" : endDerivative };
+    if (definition.matchStartCurvature)
+    {
+        fitSplineDefn = mergeMaps(fitSplineDefn, { "start2ndDerivative" : start2ndDerivative });
+    }
+    if (definition.matchEndCurvature)
+    {
+        fitSplineDefn = mergeMaps(fitSplineDefn, { "end2ndDerivative" : end2ndDerivative });
+    }
+    return fitSplineDefn;
+}
+
+// Returns direction and magnitude for end condition.
+// Returns a direction and magnitude instead of just a vector to avoid some expensive operations downstream.
+export function getEndCondition(context is Context, definition is map, points is array, totalSpan, sqrtDistance, isStart is boolean)
+{
+    const directionProperty = isStart ? "startDirection" : "endDirection";
+    const magnitudeProperty = isStart ? "startMagnitude" : "endMagnitude";
+    const matchingCurvature = isStart ? definition.matchStartCurvature : definition.matchEndCurvature;
+
+    // Index of either the first or the last point.
+    const pointIndex = isStart ? 0 : size(points) - 1;
+
+    var magnitude = definition[magnitudeProperty] * totalSpan;
+    const interpolationPointDistance = norm(isStart ? points[0] - points[1] : points[pointIndex] - points[pointIndex - 1]);
+    // if (tolerantEquals(interpolationPointDistance, 0 * meter))
+    // {
+    //     throw regenError(ErrorStringEnum.FIT_SPLINE_REPEATED_POINT, ["vertices"]);
+    // }
+
+    const directionFaces = evaluateQuery(context, qEntityFilter(definition[directionProperty], EntityType.FACE));
+    const directionEdges = evaluateQuery(context, qEntityFilter(definition[directionProperty], EntityType.EDGE));
+    var directionConnectors = [];
+    if (isAtVersionOrLater(context, FeatureScriptVersionNumber.V740_PROPAGATE_PROPERTIES_IN_PATTERNS)) // prior to this version mate connectors don't filter
+        directionConnectors = evaluateQuery(context, qBodyType(definition[directionProperty], BodyType.MATE_CONNECTOR));
+
+    if (size(directionFaces) + size(directionEdges) + size(directionConnectors) > 1)
+    {
+        throw regenError(ErrorStringEnum.TANGENCY_ONE_EDGE, [directionProperty]);
+    }
+
+    if (size(directionFaces) == 1)
+    {
+        if (matchingCurvature)
+        {
+            throw regenError(ErrorStringEnum.FIT_SPLINE_CURVATURE_FACE, [directionProperty]);
+        }
+        const direction = extractDirection(context, directionFaces[0]);
+        return { "direction" : direction, "magnitude" : magnitude };
+    }
+    else if (size(directionEdges) == 1)
+    {
+        // After V934, we will use fast parameterization ("arcLengthParameterization" : false), since this is what is returned from evDistance.
+        const useArcLengthParam = !isAtVersionOrLater(context, FeatureScriptVersionNumber.V934_FIT_SPLINE_PARAM);
+
+        var param = 0.0;
+        var tangentDirection = undefined;
+        try silent
+        {
+            var result = evDistance(context, {
+                    "side0" : directionEdges[0],
+                    "side1" : points[pointIndex],
+                    "arcLengthParameterization" : false
+                });
+            param = result.sides[0].parameter;
+            tangentDirection = evEdgeTangentLine(context, {
+                            "edge" : directionEdges[0],
+                            "parameter" : param,
+                            "arcLengthParameterization" : useArcLengthParam
+                        }).direction;
+
+            //creates better looking curves given the centripetal parameterization (and creates same geometry for legacy features)
+            magnitude *= (sqrtDistance / sqrt(interpolationPointDistance.value));
+            if (!matchingCurvature)
+            {
+                return { "direction" : tangentDirection, "magnitude" : magnitude };
+            }
+        }
+        catch
+        {
+            throw regenError(ErrorStringEnum.FIT_SPLINE_CANNOT_EVALUATE_END_CONDITION, [directionProperty]);
+        }
+        try silent
+        {
+            const edgeCurvatureData = evEdgeCurvature(context, {
+                        "edge" : directionEdges[0],
+                        "parameter" : param,
+                        "arcLengthParameterization" : useArcLengthParam
+                    });
+
+            //Using f'' = |f'|^2 * k * n
+            var secondDerivative = magnitude * magnitude * edgeCurvatureData.curvature * curvatureFrameNormal(edgeCurvatureData);
+            return { "direction" : tangentDirection, "magnitude" : magnitude, "second" : secondDerivative };
+        }
+        catch
+        {
+            throw regenError(ErrorStringEnum.FIT_SPLINE_CANNOT_EVALUATE_CURVATURE_END_CONDITION, [directionProperty]);
+        }
+    }
+    else if (size(directionConnectors) == 1)
+    {
+        if (matchingCurvature)
+        {
+            throw regenError(ErrorStringEnum.FIT_SPLINE_CURVATURE_FACE, [directionProperty]);
+        }
+        const direction = extractDirection(context, directionConnectors[0]);
+        return { "direction" : direction, "magnitude" : magnitude };
+    }
+
+    // we don't have direction input, cannot match curvature
+    if (matchingCurvature)
+    {
+        throw regenError(ErrorStringEnum.FIT_SPLINE_NEED_DIRECTION_FOR_CURVATURE, [directionProperty]);
+    }
+
+    //if we do have selections but we could not use them
+    if (isAtVersionOrLater(context, FeatureScriptVersionNumber.V705_G2_CURVES) &&
+        (isStart ? definition.hasStartDirection : definition.hasEndDirection))
+    {
+        throw regenError(ErrorStringEnum.FIT_SPLINE_CANNOT_EVALUATE_END_CONDITION, [directionProperty]);
+    }
+
+    return undefined;
+}
+
+/**
+ * @internal
+ * Handle preselection of either vertices or edges, choose fitType accordingly
+ * Keep track of whether a selection was made for directions so that we can give correct error if it goes missing
+ */
+export function fitSplineEditLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (oldDefinition == {}) // check preselection
+    {
+        const qEdges = qEntityFilter(definition.initEntities, EntityType.EDGE);
+        const qVertices = qEntityFilter(definition.initEntities, EntityType.VERTEX);
+        if (evaluateQuery(context, qEdges) != [])
+        {
+            definition.fitType = FitSplineType.EDGES;
+            definition.edges = qEdges;
+        }
+        else if (evaluateQuery(context, qVertices) != [])
+        {
+            definition.fitType = FitSplineType.VERTICES;
+            definition.vertices = qEntityFilter(definition.initEntities, EntityType.VERTEX);
+        }
+        // else keep fitType of previous invocation
+        definition.initEntities = qNothing();
+        return definition;
+    }
+
+    if (definition.fitType == FitSplineType.EDGES)
+    {
+        return definition;
+    }
+    definition.hasStartDirection = false;
+    definition.hasEndDirection = false;
+
+    if (specifiedParameters.startDirection && size(evaluateQuery(context, definition.startDirection)) > 0)
+    {
+        definition.hasStartDirection = true;
+    }
+
+    if (specifiedParameters.endDirection && size(evaluateQuery(context, definition.endDirection)) > 0)
+    {
+        definition.hasEndDirection = true;
+    }
+    return definition;
+}
+
+export function getSumSqrtDistances(points is array) returns number
+{
+    var sqrtLength = 0;
+    for (var i = 1; i < size(points); i += 1)
+    {
+        const first = points[i];
+        const second = points[i - 1];
+        // Calculating the distance without units gives a noticeable time saving especially for manipulator drag.
+        sqrtLength += sqrt(norm(vector(first[0].value - second[0].value, first[1].value - second[1].value, first[2].value - second[2].value)));
+    }
+
+    return sqrtLength;
+}
+
+// Manipulator functions
+const START_MANIPULATOR = "startManipulator";
+const END_MANIPULATOR = "endManipulator";
+
+// Picking the same factor as used in the sketch.
+const MANIPULATOR_SCALE_FACTOR = 3;
+
+export function addFitSplineManipulators(context is Context, id is Id, definition, startCondition, endCondition, points, totalSpan)
+{
+    var manipulators = {};
+
+    if (startCondition != undefined)
+    {
+        const manipulatorMagnitude = definition.startMagnitude * totalSpan / MANIPULATOR_SCALE_FACTOR;
+        manipulators[START_MANIPULATOR] = linearManipulator({
+                    "base" : points[0],
+                    "direction" : startCondition.direction,
+                    "offset" : manipulatorMagnitude,
+                    "primaryParameterId" : "startMagnitude"
+                });
+    }
+
+    if (endCondition != undefined)
+    {
+        const manipulatorMagnitude = definition.endMagnitude * totalSpan / MANIPULATOR_SCALE_FACTOR;
+        manipulators[END_MANIPULATOR] = linearManipulator({
+                    "base" : points[size(points) - 1],
+                    "direction" : -endCondition.direction,
+                    "offset" : manipulatorMagnitude,
+                    "primaryParameterId" : "endMagnitude"
+                });
+    }
+
+    addManipulators(context, id, manipulators);
+}
+
+/**
+ * @internal
+ * The manipulator change function used in the `fitSpline` feature.
+ */
+export function fitSplineManipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+    if (definition.fitType == FitSplineType.EDGES)
+    {
+        return definition;
+    }
+    const startManipulator = newManipulators[START_MANIPULATOR];
+    const endManipulator = newManipulators[END_MANIPULATOR];
+
+    const boundingBox = evBox3d(context, {
+                "topology" : definition.vertices,
+                "tight" : true
+            });
+
+    const totalSpan = norm(boundingBox.maxCorner - boundingBox.minCorner);
+    const oppositeDirectionStart = definition.oppositeDirectionStart ? -1 : 1;
+    const oppositeDirectionEnd = definition.oppositeDirectionEnd ? -1 : 1;
+
+    if (startManipulator != undefined)
+    {
+        definition.startMagnitude = startManipulator.offset * MANIPULATOR_SCALE_FACTOR / totalSpan * oppositeDirectionStart;
+    }
+
+    if (endManipulator != undefined)
+    {
+        definition.endMagnitude = endManipulator.offset * MANIPULATOR_SCALE_FACTOR / totalSpan * oppositeDirectionEnd;
+    }
+
+    return definition;
+}
+
+export const freeformMessage = {
+        // if the feature was just made and you're starting with just one point.
+        "newFeature" : "Add another point and move it to begin creating a spline.",
+
+        // if the last two points are coincident, but the last one is active for editing.
+        "overlappingEndpointsActive" : "Move the highlighted point to continue the spline.",
+
+        // if the last two points are coincident, but the last one isn't active, it will probably not be what someone wants.
+        "overlappingEndpointsInactive" : "The last two points should not be coincident.",
+
+        // if someone manually deletes points to where there are less than 2. Should be rare.
+        "tooFewPoints" : "Add at least two points in different places.",
+    };
+
+export function getEntityTypeBooleans(context is Context, entity is Query) returns map
+{
+    var entityType = { "isNothing" : false, "isBody" : false, "isPlanarFace" : false, "isNonPlanarFace" : false, "isEdge" : false, "isVertex" : false, "isMateConnector" : false };
+
+    if (isQueryEmpty(context, entity))
+    {
+        entityType.isNothing = true;
+    }
+
+    else
+    {
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.BODY)) != [])
+            entityType.isBody = true;
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.FACE)) != [])
+        {
+            if (isFacePlanar(context, entity))
+                entityType.isPlanarFace = true;
+
+            else
+                entityType.isNonPlanarFace = true;
+        }
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.EDGE)) != [])
+            entityType.isEdge = true;
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.VERTEX)) != [])
+            entityType.isVertex = true;
+
+        if (evaluateQuery(context, qBodyType(entity, BodyType.MATE_CONNECTOR)) != [])
+            entityType.isMateConnector = true;
+
+    }
+    return entityType;
+}
+
+export enum ReferenceType
+{
+    isNothing,
+    isVertex,
+    isEdge,
+    isNonPlanarFace,
+    isPlanarFace,
+    isMateConnector,
+}
+
+export function isFacePlanar(context is Context, face is Query) returns boolean
+{
+    var isPlanar;
+    try silent
+    {
+        evPlane(context, {
+                    "face" : face
+                });
+
+        isPlanar = true;
+    }
+    catch (error)
+    {
+        isPlanar = false;
+    }
+
+    return isPlanar;
+}
+
+/**
+ *Creates a set of manipulators on a face for dragging a point around on it. If the face is planar it uses lengths. If it's non-planar it uses the UVW space of the surface.
+ */
+export function faceTangentManipulator(context is Context, definition is map, basePlane, zOffset is ValueWithUnits)
+{
+    var base = basePlane.origin;
+    var x = basePlane.x;
+    var y = yAxis(basePlane);
+    var z = basePlane.normal;
+
+    var xManip = linearManipulator({
+            "base" : base,
+            "direction" : x,
+            "offset" : 0 * inch,
+            "style" : ManipulatorStyleEnum.TANGENTIAL
+        });
+
+    var yManip = linearManipulator({
+            "base" : base,
+            "direction" : y,
+            "offset" : 0 * inch,
+            "style" : ManipulatorStyleEnum.TANGENTIAL
+        });
+
+    var zManip = linearManipulator({
+            "base" : base,
+            "direction" : z,
+            "offset" : zOffset,
+        });
+
+    try silent //here since 0 offset causes a warning
+    {
+        addDebugArrow(context, base, base + zOffset * z, 0 * inch);
+    }
+
+    return { "xFaceTanManip" : xManip, "yFaceTanManip" : yManip, "zFaceTanManip" : zManip };
+}
+
+
+export function processFaceTangentManipulator(context is Context, definition is map, newManipulators)
+{
+    var vertexMap = definition.vertices[definition.pointIndex];
+    var refType = getEntityTypeBooleans(context, vertexMap.referenceSelection);
+
+    // what changed? making it more typeable/readable
+    var xChanged = newManipulators["xFaceTanManip"] is map;
+    var yChanged = newManipulators["yFaceTanManip"] is map;
+    var zChanged = newManipulators["zFaceTanManip"] is map;
+
+    if (xChanged || yChanged)
+    {
+        var m = xChanged ? newManipulators["xFaceTanManip"] : newManipulators["yFaceTanManip"];
+        var pos = m.base + m.direction * m.offset;
+
+
+        if (refType.isPlanarFace)
+        {
+            if (xChanged)
+                definition.vertices[definition.pointIndex].X += m.offset;
+
+            if (yChanged)
+                definition.vertices[definition.pointIndex].Y += m.offset;
+
+            return definition;
+        }
+        else
+        {
+            var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.vertices[definition.pointIndex].referenceSelection });
+            var newParam = distanceResult.sides[1].parameter;
+            definition.vertices[definition.pointIndex].uParam = newParam[0];
+            definition.vertices[definition.pointIndex].vParam = newParam[1];
+            return definition;
+        }
+    }
+
+    if (zChanged)
+    {
+        if (refType.isPlanarFace)
+        {
+            definition.vertices[definition.pointIndex].Z = newManipulators["zFaceTanManip"].offset;
+        }
+        else
+        {
+            definition.vertices[definition.pointIndex].normalDistance = newManipulators["zFaceTanManip"].offset;
+        }
+        return definition;
+    }
+
+
+}
+
+export function getPointInfo(vertexDefinition is map, context is Context, refType is map) returns map
+{
+    var point;
+    var pointPlane;
+
+    if (refType.isNothing)
+    {
+        point = vector(vertexDefinition.X, vertexDefinition.Y, vertexDefinition.Z);
+        pointPlane = plane(point, Z_DIRECTION);
+    }
+
+    if (refType.isVertex || refType.isMateConnector)
+    {
+        var referenceLocation = evVertexPoint(context, {
+                "vertex" : vertexDefinition.referenceSelection
+            });
+        point = referenceLocation + vector(vertexDefinition.X, vertexDefinition.Y, vertexDefinition.Z);
+        pointPlane = plane(point, Z_DIRECTION);
+    }
+
+    if (refType.isEdge)
+    {
+        var edgeCurvature = evEdgeCurvature(context, {
+                "edge" : vertexDefinition.referenceSelection,
+                "parameter" : vertexDefinition.curveParameter
+            });
+
+        point = edgeCurvature.frame.origin;
+
+        // makes a point plane on the curve where the plane normal matches the curve normal
+        pointPlane = plane(point, -edgeCurvature.frame.xAxis, edgeCurvature.frame.zAxis);
+
+    }
+
+    if (refType.isPlanarFace)
+    {
+        pointPlane = evPlane(context, {
+                    "face" : vertexDefinition.referenceSelection
+                });
+        pointPlane.origin = toWorld(planeToCSys(pointPlane), vector(vertexDefinition.X, vertexDefinition.Y, 0 * inch));
+        point = pointPlane.origin;
+        point = point + pointPlane.normal * vertexDefinition.Z;
+    }
+
+    if (refType.isNonPlanarFace)
+    {
+        pointPlane = evFaceTangentPlane(context, {
+                    "face" : vertexDefinition.referenceSelection,
+                    "parameter" : vector(vertexDefinition.uParam, vertexDefinition.vParam)
+                });
+        point = pointPlane.origin;
+        point = point + pointPlane.normal * vertexDefinition.normalDistance;
+    }
+
+    return { "point" : point, "plane" : pointPlane };
+}
+
+////////////// Filleting Polyline ///////////////
+/**
+ * @field context {Context}
+ * @field id {Id}
+ * @field definition {map}
+ *      @param pointSets {array} : an array of point sets. Each item in the array is a map `{"isArc" : boolean, "plane" : plane, "arcStart" : vector, "arcMid" : vector, "arcEnd" : vector, "point" : vector}`
+ *      @param closed {boolean} : is the polyline curve closed?
+ */
+export function createLinesFromPointSets(context is Context, id is Id, definition is map)
+{
+    var loopStart = 0;
+    var loopEnd = size(definition.pointSets);
+
+    if (!definition.closed)
+    {
+        loopEnd -= 1;
+    }
+
+    definition.pointSets = append(definition.pointSets, definition.pointSets[0]);
+
+    for (var i = loopStart; i < loopEnd; i += 1)
+    {
+        const startSet = definition.pointSets[i];
+        const endSet = definition.pointSets[i + 1];
+        const sketch = newSketchOnPlane(context, id + "lineSketch" + i, { "sketchPlane" : startSet.plane });
+
+        const startPoint = startSet.isArc ? startSet.arcEnd : startSet.point;
+        const endPoint = endSet.isArc ? endSet.arcStart : endSet.point;
+
+        skLineSegment(sketch, "line1", {
+                    "start" : worldToPlane(startSet.plane, startPoint),
+                    "end" : worldToPlane(startSet.plane, endPoint)
+                });
+
+        skSolve(sketch);
+    }
+}
+
+/**
+ * @field context {Context}
+ * @field id {Id}
+ * @field definition {map}
+ *      @param pointSets {array} : an array of point sets. Each item in the array is a map `{"isArc" : boolean, "plane" : plane, "arcStart" : vector, "arcMid" : vector, "arcEnd" : vector, "point" : vector}`
+ *      @param closed {boolean} : is the polyline curve closed?
+ */
+export function createArcsFromPointSets(context is Context, id is Id, definition)
+{
+    for (var i = 0; i < size(definition.pointSets); i += 1)
+    {
+        const pointSet = definition.pointSets[i];
+
+        if (pointSet.isArc && !tolerantEquals(pointSet.arcStart, pointSet.arcEnd))
+        {
+            const sketch = newSketchOnPlane(context, id + "arcSketch" + i, { "sketchPlane" : pointSet.plane });
+
+            skArc(sketch, "arc", {
+                        "start" : worldToPlane(pointSet.plane, pointSet.arcStart),
+                        "mid" : worldToPlane(pointSet.plane, pointSet.arcMid),
+                        "end" : worldToPlane(pointSet.plane, pointSet.arcEnd)
+                    });
+            skSolve(sketch);
+        }
+    }
+}
+
+
+/**
+ * @param context {Context}:
+ * @param definition {{
+ *      @field points {query} : a list of points to create a polyline through
+ *      @field closed {boolean} : `false` leaves the end points open. `true` connects the final point to the start
+ *      @field byRadius {boolean}
+ *      @field radius
+ *      @field width
+ * }}
+ */
+export function getArcPointSets(context is Context, definition) returns array
+{
+    var points = definition.points;
+    // const lastIsDuplicate = tolerantEquals(points[size(points) - 1], points[size(points) - 2]);
+    // if (lastIsDuplicate)
+    // {
+    //     points = resize(points, size(points) - 1);
+    // }
+
+    // add the last point to the beginning to get a triangle for the arc math.
+    points = concatenateArrays([[points[size(points) - 1]], points, [points[0]]]);
+    // doing the same here so it matches,
+    var vertexSettings = concatenateArrays([[definition.vertices[size(definition.vertices) - 1]], definition.vertices, [definition.vertices[0]]]);
+
+    const loopStart = 1;
+    const loopEnd = size(points) - 1;
+
+    var pointSets = [];
+    for (var i = loopStart; i < loopEnd; i += 1)
+    {
+        var pointSet = {};
+        const setting = vertexSettings[i];
+
+        // figuring whether to add radius based on individual override or the global setting
+        const overrideFillet = setting.filletCorner;
+        const measurement = overrideFillet ? setting.cornerBlendControlType : definition.filletAllBlendControlType;
+        const radius = overrideFillet ? setting.cornerRadius : definition.allRadius;
+        const width = overrideFillet ? setting.cornerWidth : definition.allWidth;
+
+        // used downstream to know where to draw arcs and where to continue the line all the way to the sharp.
+        const hasFillet = (setting.filletCorner || definition.filletAll);
+        const hasZeroRadius = setting.filletCorner && (tolerantEquals(radius, 0 * meter) && measurement == BlendControlType.RADIUS) || (tolerantEquals(width, 0 * meter) && measurement == BlendControlType.WIDTH);
+        const isNotEndPoint = (i != loopStart && i != loopEnd - 1);
+
+        pointSet.isArc = (isNotEndPoint || definition.closed) && hasFillet && !hasZeroRadius;
+
+        if (!tolerantEquals(points[i], points[i + 1]))
+        {
+            const lineDir1 = normalize(points[i - 1] - points[i]); // from current point toward prev point
+            const lineDir2 = normalize(points[i + 1] - points[i]); // from current point toward next point
+
+            var angle;
+            var bisectedDir;
+            if (tolerantEquals(lineDir1, lineDir2)) // if it forms a straight line back on itself i.e. 0° angle
+            {
+                angle = 0 * degree;
+                bisectedDir = lineDir1;
+                pointSet.isArc = false;
+            }
+            else if (tolerantEquals(lineDir1, -lineDir2)) // if it forms a straight line i.e. 180° angle
+            {
+                angle = 180 * degree;
+                bisectedDir = plane(points[i], lineDir1).x;
+                pointSet.isArc = false;
+            }
+            else // all other cases
+            {
+                angle = angleBetween(lineDir1, lineDir2);
+                bisectedDir = normalize(lineDir1 + lineDir2); // from current point toward arc center
+            }
+
+            const setback = getSetbackForFillet({
+                        "angle" : angle,
+                        "byRadius" : measurement == BlendControlType.RADIUS,
+                        "radius" : radius,
+                        "width" : width,
+                    });
+                    
+            if (!setback.isColinear)
+            {
+                pointSet.arcStart = points[i] + lineDir1 * setback.setback;
+                pointSet.arcMid = points[i] + bisectedDir * setback.apexToMidpoint;
+                pointSet.arcEnd = points[i] + lineDir2 * setback.setback;
+                pointSet.plane = plane(points[i], cross(lineDir1, lineDir2), lineDir1);
+                pointSet.radius = radius;
+                pointSet.plane = plane(points[i], cross(lineDir1, lineDir2), lineDir1);
+            }
+            else
+            {
+                pointSet.plane = plane(points[i], perpendicularVector(lineDir1), lineDir1);
+                pointSet.radius = 0*meter;
+            }
+        }
+        pointSet.point = points[i];
+
+        pointSets = append(pointSets, pointSet);
+    }
+
+    return pointSets;
+}
+
+
+/**
+ * Gets the distance info needed for a 3-point arc between two lines.
+ * @param definition {{
+ *      @field angle {ValueWithUnits}: The angle between two lines to fillet.
+ *      @field byRadius {boolean}: If `true`, drive the size of the arc by a radius. If `false`, drive the size of the arc by a chord width. Default is `false`.
+ *      @field radius {ValueWithUnits}: The radius of the fillet @requiredIf {`byRadius` is `true`}
+ *      @field width {ValueWithUnits}: The chord width of the fillet @requiredIf {`byRadius` is `false`}
+ * }}
+ * @returns {{
+ *      @field setback {ValueWithUnits}: The distance along each line from the apex to the.
+ *      @field radius {ValueWithUnits}: The radius of the arc.
+ *      @field apexToCenter {ValueWithUnits}: The distance from the intersection of the lines to the arc center.
+ *      @field apexToMidpoint {ValueWithUnits}: The distance from the intersection of the lines to the arc midpoint.
+ * }}
+ */
+export function getSetbackForFillet(definition) returns map
+{
+    var result = {};
+
+    result.isColinear = tolerantEquals(definition.angle, 180 * degree) || tolerantEquals(definition.angle, 0 * degree);
+
+    if (!result.isColinear)
+    {
+        const halfAngle = definition.angle / 2;
+
+        if (definition.byRadius) // setback by radius
+        {
+            result.setback = definition.radius / tan(halfAngle);
+            result.radius = definition.radius;
+        }
+        else // setback by width
+        {
+            const halfWidth = definition.width / 2;
+            result.setback = halfWidth / sin(halfAngle);
+            result.radius = tan(halfAngle) * result.setback;
+        }
+
+        result.apexToCenter = result.setback / cos(halfAngle);
+        result.apexToMidpoint = result.apexToCenter - result.radius;
+    }
+
+    return result;
+}
+
