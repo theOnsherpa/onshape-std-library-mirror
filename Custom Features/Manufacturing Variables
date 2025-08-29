@@ -1,0 +1,240 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1890;
+import(path : "onshape/std/geometry.fs", version : "1890.0");
+
+import(path : "onshape/std/sheetMetalUtils.fs", version : "1890.0");
+icon::import(path : "114e0c829960d57fd0dbe5b8", version : "438d3c002a32e70675790d44");
+
+
+export enum ProcessType
+{
+    annotation { "Name" : "Injection mold" }
+    INJECTION_MOLDED,
+    annotation { "Name" : "CNC" }
+    CNC,
+    annotation { "Name" : "Sheet metal" }
+    SHEET_METAL,
+    annotation { "Name" : "Laser cut" }
+    LASER_CUT,
+}
+
+annotation { "Feature Type Name" : "Manufacturing Variables", "Icon" : icon::BLOB_DATA }
+export const plasticVariables = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Prepend names", "UIHint" : UIHint.DISPLAY_SHORT }
+        definition.prependBool is boolean;
+        if (definition.prependBool)
+        {
+            annotation { "Name" : "Prepend variable names", "UIHint" : UIHint.DISPLAY_SHORT, "Default" : "part_1" }
+            definition.prepend is string;
+        }
+
+        annotation { "Name" : "Manufacturing process", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE] }
+        definition.process is ProcessType;
+
+        // INJECTION MOLDING VARIABLES
+        if (definition.process == ProcessType.INJECTION_MOLDED)
+        {
+
+            annotation { "Name" : "Wall thickness", "Default" : true }
+            definition.wallBool is boolean;
+
+            if (definition.wallBool)
+            {
+                annotation { "Group Name" : "Wall", "Collapsed By Default" : false, "Driving Parameter" : "wallBool" }
+                {
+                    annotation { "Name" : "#nominalThickness" }
+                    isLength(definition.nominal, { (millimeter) : [0, 3, 1000000], (inch) : .1 } as LengthBoundSpec);
+
+                    annotation { "Name" : "Rib as %", "Default" : true }
+                    definition.ribAsPercent is boolean;
+
+                    if (definition.ribAsPercent)
+                    {
+                        annotation { "Name" : "#ribThickness" }
+                        isReal(definition.ribPercent, { (unitless) : [0, 60, 100] } as RealBoundSpec);
+                    }
+                    else
+                    {
+                        annotation { "Name" : "#ribThickness" }
+                        isLength(definition.ribThickness, { (millimeter) : [0, 1.8, 1000000], (inch) : .1 } as LengthBoundSpec);
+                    }
+                }
+            }
+
+            annotation { "Name" : "Draft", "Default" : true }
+            definition.draftBool is boolean;
+
+            if (definition.draftBool)
+            {
+                annotation { "Group Name" : "Draft", "Collapsed By Default" : false, "Driving Parameter" : "draftBool" }
+                {
+                    annotation { "Name" : "#mainDraft" }
+                    isAngle(definition.draft, { (degree) : [0, 3, 360] } as AngleBoundSpec);
+
+                    annotation { "Name" : "#minDraft" }
+                    isAngle(definition.minDraft, { (degree) : [0, 0.5, 360] } as AngleBoundSpec);
+
+                    annotation { "Name" : "#shutoffDraft" }
+                    isAngle(definition.shutoffDraft, { (degree) : [0, 5, 360] } as AngleBoundSpec);
+                }
+            }
+
+            annotation { "Name" : "Final fillet", "UIHint" : UIHint.DISPLAY_SHORT }
+            definition.finalFilletBool is boolean;
+
+            if (definition.finalFilletBool)
+            {
+                annotation { "Name" : "#finalFillet radius", "UIHint" : UIHint.DISPLAY_SHORT }
+                isLength(definition.finalFillet, { (millimeter) : [0, .3, 1000000], (inch) : .1 } as LengthBoundSpec);
+            }
+
+        }
+        // CNC VARIABLES
+        if (definition.process == ProcessType.CNC)
+        {
+            // annotation { "Group Name" : "Cutter", "Collapsed By Default" : false }
+            // {
+            annotation { "Name" : "#cutterRadius" }
+            isLength(definition.cutterRadius, { (millimeter) : [0, 1, 1000000], (inch) : .025 } as LengthBoundSpec);
+
+            annotation { "Name" : "#cutterDepth" }
+            isLength(definition.cutterDepth, LENGTH_BOUNDS);
+            // }
+        }
+        // SHEET METAL VARIABLES
+        if (definition.process == ProcessType.SHEET_METAL)
+        {
+            // annotation { "Group Name" : "Sheet variables", "Collapsed By Default" : false }
+            // {
+
+            annotation { "Name" : "#thickness" }
+            isLength(definition.sheetMetalThickness, SM_THICKNESS_BOUNDS);
+
+            annotation { "Name" : "#bendRadius" }
+            isLength(definition.bendRadius, SM_BEND_RADIUS_BOUNDS);
+
+            annotation { "Name" : "#kFactor" }
+            isReal(definition.kFactor, K_FACTOR_BOUNDS);
+
+            annotation { "Name" : "kFactorRolled" }
+            isReal(definition.kFactorRolled, ROLLED_K_FACTOR_BOUNDS);
+
+            annotation { "Name" : "#minimalClearance" }
+            isLength(definition.minimalClearance, SM_MINIMAL_CLEARANCE_BOUNDS);
+
+            // }
+
+        }
+
+        // LASER CUT VARIABLES
+        if (definition.process == ProcessType.LASER_CUT)
+        {
+            // annotation { "Group Name" : "Laser cut variables", "Collapsed By Default" : false }
+            // {
+            annotation { "Name" : "#sheetThickness" }
+            isLength(definition.laserSheetThickness, { (millimeter) : [0, 10, 100000], (inch) : 0.25 } as LengthBoundSpec);
+
+            annotation { "Name" : "#kerf" }
+            isLength(definition.laserKerf, { (millimeter) : [0, 0.15, 100000] } as LengthBoundSpec);
+
+            annotation { "Name" : "#nodeHeight" }
+            isLength(definition.nodeHeight, { (millimeter) : [0, 0.15, 100000] } as LengthBoundSpec);
+
+            annotation { "Name" : "#nodeWidth" }
+            isLength(definition.nodeWidth, { (millimeter) : [0, 3, 100000] } as LengthBoundSpec);
+
+            annotation { "Name" : "#cornerReliefDiameter" }
+            isLength(definition.cornerReliefDiameter, { (millimeter) : [0, .3, 100000] } as LengthBoundSpec);
+            // }
+        }
+
+        annotation { "Name" : "General clearance", "UIHint" : UIHint.DISPLAY_SHORT }
+        definition.clearanceBool is boolean;
+
+        if (definition.clearanceBool)
+        {
+            annotation { "Name" : "Clearance", "UIHint" : UIHint.DISPLAY_SHORT }
+            isLength(definition.clearance, { (millimeter) : [0, .3, 1000000], (inch) : .1 } as LengthBoundSpec);
+        }
+
+    }
+    {
+        var v = {};
+
+        // INJECTION MOLDING
+        if (definition.process == ProcessType.INJECTION_MOLDED)
+        {
+            if (definition.wallBool)
+            {
+                v.nominalThickness = { "value" : definition.nominal, "description" : "The main wall thickness of the plastic part." };
+                if (definition.ribAsPercent)
+                {
+                    v.ribThickness = { "value" : definition.nominal * definition.ribPercent / 100, "description" : "Default thickness of ribs relative to the nominal wall thickness." };
+                }
+                else
+                {
+                    v.ribThickness = { "value" : definition.ribThickness, "description" : "Default thickness of ribs relative to the nominal wall thickness." };
+                }
+            }
+            if (definition.draftBool)
+            {
+                v.mainDraft = { "value" : definition.draft, "description" : "Default draft angle." };
+                v.minDraft = { "value" : definition.minDraft, "description" : "The smallest draft angle possible for certain areas." };
+                v.shutoffDraft = { "value" : definition.shutoffDraft, "description" : "The draft angle to use for shutoff areas." };
+            }
+            if (definition.finalFilletBool)
+            {
+                v.finalFillet = { "value" : definition.finalFillet, "description" : "The radius to use on all finishing fillets." };
+            }
+        }
+
+        //CNC
+        if (definition.process == ProcessType.CNC)
+        {
+            v.cutterRadius = { "value" : definition.cutterRadius, "description" : "The radius of the CNC cutting tool." };
+            v.cutterDepth = { "value" : definition.cutterDepth, "description" : "The depth of the CNC cutting tool." };
+        }
+
+        // SHEET METAL
+        if (definition.process == ProcessType.SHEET_METAL)
+        {
+            v.thickness = { "value" : definition.sheetMetalThickness, "description" : "The thickness of the sheet metal." };
+            v.bendRadius = { "value" : definition.bendRadius, "description" : "The default bend radius for the sheet metal part." };
+            v.kFactor = { "value" : definition.kFactor, "description" : "The k factor for the material being used. A factor of 0.5 will bend the part symmetrically. A factor of 0 or 1 will bend it around the top face or bottom face." };
+            v.kFactorRolled = { "value" : definition.kFactorRolled, "description" : "" };
+            v.minimalClearance = { "value" : definition.minimalClearance, "description" : "The default smallest gap between sections of the sheet metal that should be essentially touching." };
+        }
+
+        // LASER CUT
+        if (definition.process == ProcessType.LASER_CUT)
+        {
+            v.sheetThickness = { "value" : definition.laserSheetThickness, "description" : "The thickness of the workpiece" };
+            v.kerf = { "value" : definition.laserKerf, "description" : "The amount of material removed by cutting." };
+            v.nodeHeight = { "value" : definition.nodeHeight, "description" : "The height of nodes used" };
+            v.nodeWidth = { "value" : definition.nodeWidth, "description" : "" };
+            v.cornerReliefDiameter = { "value" : definition.cornerRelief, "description" : "" };
+        }
+
+        // GENERAL
+        if (definition.clearanceBool)
+        {
+            v.clearance = { "value" : definition.clearance, "description" : "" };
+        }
+
+        // SET VARIABLES
+        var prepend = "";
+        if (definition.prependBool)
+        {
+            verifyVariableName(definition.prepend, "prepend");
+            prepend = definition.prepend ~ "_";
+        }
+
+        for (var entry in v)
+        {
+            setVariable(context, prepend ~ entry.key, entry.value.value, entry.value.description);
+        }
+    });
