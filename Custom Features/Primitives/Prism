@@ -1,0 +1,143 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1576;
+import(path : "onshape/std/geometry.fs", version : "1576.0");
+export import(path : "onshape/std/boolean.fs", version : "1576.0");
+export import(path : "b82bd38a9390b4dd3155b161", version : "25f259d811ce5137fa6d74ba");
+icon::import(path : "9d4e226918c0c648c697d6c2", version : "69e913dab2aebe5b69f10f44");
+
+annotation { "Feature Type Name" : "Prism",
+        "Manipulator Change Function" : "twoEndedManipulatorFunction",
+        "Editing Logic Function" : "twoEndedPrimitiveEditingLogic",
+        "Icon" : icon::BLOB_DATA }
+export const prism = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "isPrism", "UIHint" : UIHint.ALWAYS_HIDDEN, "Default" : true }
+        definition.isPrism is boolean;
+
+        twoEndedPrimitivePredicate(definition);
+    }
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        // adding some values to the definition depending on linked or un-linked inputs. i.e. "definition.usedDia1" and "definition.usedLength2"
+        definition = getTwoEndedValues(context, id, definition);
+
+        // if nothing is selected, or the origin is selected, place an item on the origin.
+        try silent
+        {
+            if (isOriginSelected(context, definition.locations))
+            {
+                // if the origin is selected, subtract it from the query so that the object below can replace it (keeps IDs stable and doesn't dublicate objects when only the origin is selected)
+                definition.locations = definition.locations->qSubtraction(qCreatedBy(makeId("Origin")));
+
+                createPrismOnOrigin(context, id, definition.usedDia2, definition.usedDia1, definition.usedLength2, definition.usedLength1, definition.sides);
+            }
+        }
+        // if anything is selected, place an item at the center
+        forEachEntity(context, id + "operation", definition.locations, function(vertex is Query, id is Id)
+            {
+                // make a prism on the origin (if efficiency matters I should find a way to pattern it instead of making new ones every time, but not sure I care for this one 🤷)
+
+                createPrismOnOrigin(context, id, definition.usedDia2, definition.usedDia1, definition.usedLength2, definition.usedLength1, definition.sides);
+
+                // move the prism into place
+                var transforms = getTransform(context, vertex);
+
+                var body = qCreatedBy(id + "loft1", EntityType.BODY);
+
+                opTransform(context, id + "transform", {
+                            "bodies" : body,
+                            "transform" : transforms
+                        });
+
+            });
+            
+            transformResultIfNecessary(context, id, remainingTransform);
+
+        // merge bodies
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+
+        // deciding to place manipulators at the origin if nothing is selected, or at the location of the first selection.
+        twoEndedPrimitiveManipulators(context, id, definition);
+
+    });
+
+export function createPrismOnOrigin(context is Context, id is Id, startDia is ValueWithUnits, endDia is ValueWithUnits, startDepth is ValueWithUnits, endDepth is ValueWithUnits, sides is number)
+{
+    var startProfile;
+
+    if (startDia != 0 * inch)
+    {
+
+        var startPlane = plane(vector(0 * inch, 0 * inch, -startDepth), Z_DIRECTION, X_DIRECTION);
+
+        var startSketch = newSketchOnPlane(context, id + "startSketch", {
+                "sketchPlane" : startPlane
+            });
+
+        skRegularPolygon(startSketch, "startPolygon", {
+                    "center" : vector(0, 0) * inch,
+                    "firstVertex" : vector(startDia / 2, 0 * inch),
+                    "sides" : sides
+                });
+
+        skSolve(startSketch);
+
+        startProfile = qCreatedBy(id + "startSketch", EntityType.FACE);
+    }
+    else
+    {
+        opPoint(context, id + "startPoint", {
+                    "point" : vector(0 * inch, 0 * inch, -startDepth)
+                });
+
+        startProfile = qCreatedBy(id + "startPoint");
+    }
+
+
+    var endProfile;
+
+    if (endDia != 0 * inch)
+    {
+        var endPlane = plane(vector(0 * inch, 0 * inch, endDepth), Z_DIRECTION, X_DIRECTION);
+
+        var endSketch = newSketchOnPlane(context, id + "endSketch", {
+                "sketchPlane" : endPlane
+            });
+
+        skRegularPolygon(endSketch, "endPolygon", {
+                    "center" : vector(0, 0) * inch,
+                    "firstVertex" : vector(endDia / 2, 0 * inch),
+                    "sides" : sides
+                });
+
+        skSolve(endSketch);
+
+        endProfile = qCreatedBy(id + "endSketch", EntityType.FACE);
+    }
+    else
+    {
+        opPoint(context, id + "endPoint", {
+                    "point" : vector(0 * inch, 0 * inch, endDepth)
+                });
+
+        endProfile = qCreatedBy(id + "endPoint");
+    }
+
+    opLoft(context, id + "loft1", {
+                "profileSubqueries" : [startProfile, endProfile]
+            });
+
+    opDeleteBodies(context, id + "deleteBodies1", {
+                "entities" : qUnion([qCreatedBy(id + "endSketch"), qCreatedBy(id + "startSketch"), qCreatedBy(id + "endPoint"), qCreatedBy(id + "startPoint")])
+            });
+}
+
+
