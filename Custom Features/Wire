@@ -1,0 +1,297 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1618;
+import(path : "onshape/std/geometry.fs", version : "1618.0");
+export import(path : "3e9e6321b641c9ccdfc643c5", version : "acd50c57954ccc3bb5ffcc76");
+
+icon::import(path : "bba670d7980b9336d385ad33", version : "d0ee7dfc709cc1c6a4bc697c");
+
+annotation { "Feature Type Name" : "Wire",
+"Description" : "Wire creates AWG standard gauge wires swepth on curves. It has options to set jacket thickness, and color. It also produces a Custom Table containing wire lengths, and colors.",
+"Editing Logic Function" : "wireEditingLogic", "Icon" : icon::BLOB_DATA }
+export const wire = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Curves", "Filter" : EntityType.EDGE || (EntityType.BODY && BodyType.WIRE) }
+        definition.curves is Query;
+
+        annotation { "Name" : "Tangent propagation", "Default" : true }
+        definition.tangentPropagation is boolean;
+
+        annotation { "Name" : "Wire gauge (AWG)", "Default" : wireGaugeType.AWG20, "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE] }
+        definition.gauge is wireGaugeType;
+
+        annotation { "Name" : "Wire diameter", "UIHint" : UIHint.UNCONFIGURABLE }
+        isLength(definition.wireDiameter, LENGTH_BOUNDS);
+
+        annotation { "Name" : "Insulation thickness", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        isLength(definition.insulation, { (millimeter) : [0, .3, 1000000] } as LengthBoundSpec);
+
+        annotation { "Name" : "No jacket", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.noInsulation is boolean;
+
+        if (!definition.noInsulation)
+        {
+            annotation { "Name" : "Color", "UIHint" : UIHint.SHOW_LABEL }
+            definition.color is wireColorType;
+
+            annotation { "Name" : "Strip wire ends", "UIHint" : UIHint.DISPLAY_SHORT }
+            definition.addEnds is boolean;
+
+            if (definition.addEnds)
+            {
+                annotation { "Name" : "Length", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.DISPLAY_SHORT] }
+                isLength(definition.endLength, { (millimeter) : [0, 7, 1000000] } as LengthBoundSpec);
+            }
+        }
+    }
+    {
+        verifyNonemptyQuery(context, definition, "curves", "Select curves");
+
+        const insulationColor = definition.noInsulation ? copperColor : wireColor[toString(definition.color)]; // if the insulation is 0, then there's not jacket so color it copper.
+
+        const gauge = definition.gauge;
+        var endLength = 0 * millimeter;
+        if (definition.addEnds)
+        {
+            endLength = definition.endLength;
+        }
+
+        var inputCurves = dissolveWires(definition.curves);
+        if (definition.tangentPropagation)
+        {
+            inputCurves = qTangentConnectedEdges(inputCurves);
+        }
+
+        var remainingTransform = getRemainderPatternTransform(context,
+        {
+                "references" : inputCurves
+            });
+
+        opExtractWires(context, id + "opExtractWires", { "edges" : inputCurves });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        var compositeCurves = qCreatedBy(id + "opExtractWires", EntityType.BODY);
+
+        const diameter = definition.wireDiameter + (definition.insulation * 2);
+
+        forEachEntity(context, id + "makeWires", compositeCurves, function(curve is Query, id is Id)
+            {
+                var curves = dissolveWires(curve);
+                var path = constructPath(context, curves);
+                var start = evPathTangentLines(context, path, [0]).tangentLines[0];
+                var startOrigin = start.origin;
+                var startNormal = start.direction;
+                var startPlane = plane(startOrigin, startNormal);
+                var sketch = newSketchOnPlane(context, id + "sketch", { "sketchPlane" : startPlane });
+                skCircle(sketch, "circle", {
+                            "center" : vector(0, 0) * inch,
+                            "radius" : diameter / 2
+                        });
+                skSolve(sketch);
+
+                var profile = qEntityFilter(qCreatedBy(id + "sketch"), EntityType.FACE);
+
+                // sweep the wire body
+                opSweep(context, id + "sweep", {
+                            "profiles" : profile,
+                            "path" : qUnion(path.edges)
+                        });
+
+                var wireBody = qCreatedBy(id + "sweep", EntityType.BODY);
+
+                // Name the wire body
+                setProperty(context, {
+                            "entities" : wireBody,
+                            "propertyType" : PropertyType.NAME,
+                            "value" : "Wire " ~ gauge
+                        });
+
+                // color the wire insulation (main body)
+                setProperty(context, {
+                            "entities" : wireBody,
+                            "propertyType" : PropertyType.APPEARANCE,
+                            "value" : insulationColor
+                        });
+
+                var pathLength = evPathLength(context, path);
+
+                if (!definition.noInsulation && definition.addEnds)
+                {
+                    var ends = qUnion([qCapEntity(id + "sweep", CapType.END, EntityType.FACE), qCapEntity(id + "sweep", CapType.START, EntityType.FACE)]);
+                    // check it's not a closed loop
+                    if (evaluateQuery(context, ends) != [])
+                    {
+                        // sketch circles to split with since an infinite plane could cause unwanted splits on curvy wires
+                        var endSplitLocation = evPathTangentLines(context, path, [endLength / pathLength]).tangentLines[0];
+                        var endSplitPlane = plane(endSplitLocation.origin, endSplitLocation.direction);
+                        var endSplitSketch = newSketchOnPlane(context, id + "endSketch", {
+                                "sketchPlane" : endSplitPlane
+                            });
+                        skCircle(endSplitSketch, "endCircle", {
+                                    "center" : vector(0, 0) * inch,
+                                    "radius" : diameter + .05 * millimeter
+                                });
+                        skSolve(endSplitSketch);
+
+                        var startSplitLocation = evPathTangentLines(context, path, [(pathLength - endLength) / pathLength]).tangentLines[0];
+                        var startSplitPlane = plane(startSplitLocation.origin, startSplitLocation.direction);
+                        var startSplitSketch = newSketchOnPlane(context, id + "startSketch", {
+                                "sketchPlane" : startSplitPlane
+                            });
+                        skCircle(startSplitSketch, "startCircle", {
+                                    "center" : vector(0, 0) * inch,
+                                    "radius" : diameter + .05 * millimeter
+                                });
+                        skSolve(startSplitSketch);
+
+                        // split the side face of the wire
+                        var faceTargets = qNonCapEntity(id + "sweep", EntityType.FACE);
+
+                        opSplitFace(context, id + "splitFace1", {
+                                    "faceTargets" : faceTargets,
+                                    "faceTools" : qUnion([qCreatedBy(id + "endSketch", EntityType.FACE), qCreatedBy(id + "startSketch", EntityType.FACE)])
+                                });
+
+                        // thin ends by wire housing thickness
+                        var moveFaces = qAdjacent(ends, AdjacencyType.EDGE, EntityType.FACE);
+                        opOffsetFace(context, id + "offsetFace", {
+                                    "moveFaces" : moveFaces,
+                                    "offsetDistance" : -definition.insulation
+                                });
+
+                        // color wire ends a copper color
+                        var endColorFaces = qUnion([ends, moveFaces]);
+                        setProperty(context, {
+                                    "entities" : endColorFaces,
+                                    "propertyType" : PropertyType.APPEARANCE,
+                                    "value" : copperColor
+                                });
+
+                    }
+                    else
+                    {
+                        // if it's a closed loop, explain that you can't add ends
+                        reportFeatureInfo(context, id, "Cannot apply ends to closed loops.");
+                    }
+
+                }
+
+                // delete sketch entities
+                opDeleteBodies(context, id + "deleteBodies", {
+                            "entities" : qUnion([qCreatedBy(id + "sketch"), qCreatedBy(id + "startSketch"), qCreatedBy(id + "endSketch")])
+                        });
+
+                // assign path length to wire body to use in tables
+                setAttribute(context, {
+                            "entities" : wireBody,
+                            "name" : "wireLength",
+                            "attribute" : pathLength
+                        });
+
+                // assign color name to wire body to check for tables
+                setAttribute(context, {
+                            "entities" : wireBody,
+                            "name" : "wireColor",
+                            "attribute" : definition.color
+                        });
+
+            });
+
+        // delete composite curves
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : compositeCurves
+                });
+    });
+
+export function wireEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    // tossing into an if statement so it doesn't always run. Not sure if this helps performance, but hope so.
+    if (oldDefinition.insulation != definition.insulation)
+    {
+
+        // if the insulation thickness is 0
+        definition.noInsulation = tolerantEquals(definition.insulation, 0 * inch);
+        return definition;
+    }
+
+    // if the gauge changes or the feature is just being created, set the diameter to match the gauge
+    if (oldDefinition.gauge != definition.gauge || isCreating)
+    {
+        definition.wireDiameter = wireGaugeList[toString(definition.gauge)];
+        return definition;
+    }
+
+    // if the diameter is entered manually, set the gauge to custom
+    if (oldDefinition.wireDiameter != definition.wireDiameter)
+    {
+        definition.gauge = wireGaugeType.Custom;
+        return definition;
+    }
+}
+
+annotation { "Table Type Name" : "Wire Lengths", "Icon" : icon::BLOB_DATA }
+export const wireLengths = defineTable(function(context is Context, definition is map) returns Table
+    precondition
+    {
+    }
+    {
+        var columns = [];
+        const curveColumnName = "wireName";
+        const colorColumnName = "color";
+        const lengthColumnName = "length";
+        columns = append(columns, tableColumnDefinition(curveColumnName, "Wire"));
+        columns = append(columns, tableColumnDefinition(colorColumnName, "Color"));
+        columns = append(columns, tableColumnDefinition(lengthColumnName, "Length"));
+
+        var rows = [];
+
+        var entitiesWithWireAttribute = evaluateQuery(context, qHasAttribute("wireLength"));
+
+        for (var wireBody in entitiesWithWireAttribute)
+        {
+            const wireName = getProperty(context, {
+                        "entity" : qOwnerBody(wireBody),
+                        "propertyType" : PropertyType.NAME
+                    });
+
+            var colorRead = getProperty(context, {
+                    "entity" : wireBody,
+                    "propertyType" : PropertyType.APPEARANCE
+                });
+
+            colorRead.red = roundToPrecision(colorRead.red, 2);
+            colorRead.green = roundToPrecision(colorRead.green, 2);
+            colorRead.blue = roundToPrecision(colorRead.blue, 2);
+            var colorName = getAttribute(context, { "entity" : wireBody, "name" : "wireColor" });
+
+            var colorSpec = wireColor[toString(colorName)];
+
+            colorSpec.red = roundToPrecision(colorSpec.red, 2);
+            colorSpec.green = roundToPrecision(colorSpec.green, 2);
+            colorSpec.blue = roundToPrecision(colorSpec.blue, 2);
+
+            // if the color doesn't match the spec and isn't copper color, then it was edited. There's an outlandish case where someone changes the insulation to copper color manually, but it's niche enough to ignore.
+            if (colorSpec != colorRead)
+            {
+                colorName = "Edited by user";
+            }
+
+            // if there's no insulation and the wire is copper color, say there's no insulation
+            if (colorRead == copperColor)
+            {
+                colorName = "No insulation";
+            }
+
+            var length = getAttribute(context, {
+                    "entity" : wireBody,
+                    "name" : "wireLength"
+                });
+
+            var row = { (curveColumnName) : wireName, (colorColumnName) : colorName, (lengthColumnName) : length };
+            rows = append(rows, tableRow(row, wireBody));
+        }
+        return table("Wire Lengths", columns, rows);
+    });
