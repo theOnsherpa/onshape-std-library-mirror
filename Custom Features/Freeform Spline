@@ -1,0 +1,1037 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1746;
+export import(path : "onshape/std/geometry.fs", version : "1746.0");
+export import(path : "onshape/std/common.fs", version : "1746.0");
+import(path : "onshape/std/table.fs", version : "1746.0");
+// import(path : "12312312345abcabcabcdeff/70863a15aeee178010781a68/68f58bc3409644b79ccc306c", version : "29e74928a88f6ca8bdfe844d");
+
+
+export import(path : "9f4c9835d8018ff7dbdb5683/ffaca39d1d22450f59e60d16/c60f4a6e12f07acee647a2a1", version : "198e65e227da4b79f32bd021");
+
+
+export import(path : "4f423c334730b24d06e704aa", version : "f527a4e6264151c5bc9dae4d");
+export import(path : "4f423c334730b24d06e704aa", version : "f527a4e6264151c5bc9dae4d");
+Xicon::import(path : "fe4a6c14fdcb9acbe044fba9/a1edf485534f048f9ffd5a09/de4fb06f7528b840ac85474d", version : "44fd48126e8cc2823e6074c6");
+Yicon::import(path : "fe4a6c14fdcb9acbe044fba9/a1edf485534f048f9ffd5a09/ccc7fcee8b53c2e8c81b945f", version : "991e6d8d91111b75df59d738");
+Zicon::import(path : "fe4a6c14fdcb9acbe044fba9/a1edf485534f048f9ffd5a09/840daeefecd01e44e872014b", version : "27048b7311dc0d2f9bdb00e4");
+icon::import(path : "69c123122ca98fc4f051d626", version : "fb530774b907fdaa479d437f");
+
+annotation { "Feature Type Name" : "Freeform spline",
+        "Manipulator Change Function" : "freeformManipulatorChange",
+        "Editing Logic Function" : "freeSplineEditingLogic",
+        "Icon" : icon::BLOB_DATA
+    }
+export const freeformSpline = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        // a boolean to tell whether a new point was added by the insert mode or not. this drives whether parts of the editing logic should run or not.
+        annotation { "Name" : "point was added by a manipulator", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.manipChangedPointsList is boolean;
+
+        // a boolean to tell when the feature has just been created. If so we can go ahead and add the first two spline points for the user.
+        annotation { "Name" : "point was added by a manipulator", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.newFeature is boolean;
+
+        // switch between standard create mode and a new insert mode
+        annotation { "Name" : "Mode", "UIHint" : UIHint.HORIZONTAL_ENUM, "Description" : "Use create mode to edit the curve. Use Insert mode to add points to the curve. Use Delete mode to remove points from the curve." }
+        definition.mode is freeformSplineModeType;
+
+        if (definition.mode == freeformSplineModeType.Create)
+        {
+
+            // for b-spline and polyline options
+            annotation { "Name" : "Style", "UIHint" : [UIHint.SHOW_LABEL], "Description" : "Changes how the curve is created with relation to the points. Interpolate creates a fit spline which touches each point. Control point curve creates a b-spline, with the points as the controls. Polyline creates a composite curve of straight segments between the points." }
+            definition.creationType is freeformSplineCreationType;
+
+            // This hidden number changes the index of the selected point when it's clicked.
+            annotation { "Name" : "Point index", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            isInteger(definition.pointIndex, { (unitless) : [0, 0, 1000000] } as IntegerBoundSpec);
+
+            annotation { "Name" : "Vertices", "Item name" : "Vertex", "Item label template" : "Vertex #arrayPointIndex" }
+            definition.vertices is array;
+
+            for (var vertex in definition.vertices)
+            {
+
+                // This hidden index number let's me rename the point with its index value. i.e. "Point 1"
+                annotation { "Name" : "Array point index", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(vertex.arrayPointIndex, { (unitless) : [0, 0, 1000000] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Reference vertex, edge, or face", "Filter" : QueryFilterCompound.ALLOWS_VERTEX || EntityType.EDGE || EntityType.FACE, "MaxNumberOfPicks" : 1
+                        , "UIHint" : [UIHint.MATCH_LAST_ARRAY_ITEM, UIHint.UNCONFIGURABLE]
+                        }
+                vertex.referenceSelection is Query;
+
+                if (definition.creationType == freeformSplineCreationType.bSpline)
+                {
+                    annotation { "Name" : "Weight" }
+                    isReal(vertex.weight, { (unitless) : [0.00001, 1, 1e6] } as RealBoundSpec);
+                }
+
+                // this hidden enum is controlled by editing logic and tells the UI what kind of reference is selected.
+                annotation { "Name" : "Reference Type", "UIHint" : [UIHint.ALWAYS_HIDDEN, UIHint.MATCH_LAST_ARRAY_ITEM] }
+                vertex.refType is ReferenceType;
+
+                if (vertex.refType == ReferenceType.isNothing || vertex.refType == ReferenceType.isVertex || vertex.refType == ReferenceType.isPlanarFace)
+                {
+                    annotation { "Name" : "X", "Icon" : Xicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isLength(vertex.X, ZERO_DEFAULT_LENGTH_BOUNDS);
+
+                    annotation { "Name" : "Y", "Icon" : Yicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isLength(vertex.Y, ZERO_DEFAULT_LENGTH_BOUNDS);
+
+                    annotation { "Name" : "Z", "Icon" : Zicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isLength(vertex.Z, ZERO_DEFAULT_LENGTH_BOUNDS);
+                }
+
+                if (vertex.refType == ReferenceType.isEdge)
+                {
+                    annotation { "Name" : "Location on curve", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isReal(vertex.curveParameter, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+                }
+
+                if (vertex.refType == ReferenceType.isNonPlanarFace)
+                {
+                    annotation { "Name" : "U Parameter", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isReal(vertex.uParam, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+
+                    annotation { "Name" : "V Parameter", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isReal(vertex.vParam, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+
+                    annotation { "Name" : "Normal distance", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isLength(vertex.normalDistance, ZERO_DEFAULT_LENGTH_BOUNDS);
+                }
+
+                if (definition.creationType == freeformSplineCreationType.Polyline)
+                {
+                    annotation { "Name" : "Fillet corner", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM, "Description" : "If checked, this corner will be rounded. This setting overrides corners filleted with `Fillet all corners` below." }
+                    vertex.filletCorner is boolean;
+
+                    if (vertex.filletCorner)
+                    {
+                        annotation { "Name" : "Measurement", "UIHint" : [UIHint.MATCH_LAST_ARRAY_ITEM, UIHint.SHOW_LABEL] }
+                        vertex.cornerBlendControlType is BlendControlType;
+                        if (vertex.cornerBlendControlType == BlendControlType.RADIUS)
+                        {
+                            annotation { "Name" : "Radius", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                            isLength(vertex.cornerRadius, ZERO_INCLUSIVE_OFFSET_BOUNDS);
+                        }
+                        else
+                        {
+                            annotation { "Name" : "Width", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                            isLength(vertex.cornerWidth, BLEND_BOUNDS);
+                        }
+                    }
+                }
+            }
+            if (definition.creationType == freeformSplineCreationType.bSpline)
+            {
+                annotation { "Name" : "Single span curve", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE, "Description" : "Forces the curve degree to be equal to the number of points -1, creating a very smooth curve." }
+                definition.singleSpan is boolean;
+
+                if (!definition.singleSpan)
+                {
+                    annotation { "Name" : "Degree", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                    isInteger(definition.degree, { (unitless) : [2, 3, 15] } as IntegerBoundSpec);
+                }
+
+                annotation { "Name" : "Display control polygon", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.displayControl is boolean;
+            }
+
+            if (definition.creationType == freeformSplineCreationType.Polyline)
+            {
+                annotation { "Name" : "Fillet all corners", "Description" : "Sets all fillets to the same value, but is overridden by the values of each point if 'Fillet corner' is selected." }
+                definition.filletAll is boolean;
+
+                if (definition.filletAll)
+                {
+                    annotation { "Name" : "Single spline", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                    definition.fitSpline is boolean;
+
+                    annotation { "Name" : "Measurement" }
+                    definition.filletAllBlendControlType is BlendControlType;
+
+                    if (definition.filletAllBlendControlType == BlendControlType.RADIUS)
+                    {
+                        annotation { "Name" : "Radius", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                        isLength(definition.allRadius, BLEND_BOUNDS);
+                    }
+                    else
+                    {
+                        annotation { "Name" : "Width", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                        isLength(definition.allWidth, BLEND_BOUNDS);
+                    }
+                }
+            }
+
+            annotation { "Name" : "Closed spline" }
+            definition.closed is boolean;
+
+            if (!definition.closed && definition.creationType == freeformSplineCreationType.Interpolate)
+            {
+                annotation { "Name" : "Start direction", "Filter" : EntityType.EDGE || QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                definition.startDirection is Query;
+
+                annotation { "Name" : "Start magnitude" }
+                isReal(definition.startMagnitude, CLAMP_MAGNITUDE_REAL_BOUNDS);
+
+                annotation { "Name" : "Opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.oppositeDirectionStart is boolean;
+
+                annotation { "Name" : "Match curvature at start" }
+                definition.matchStartCurvature is boolean;
+
+                annotation { "Name" : "End direction", "Filter" : EntityType.EDGE || QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                definition.endDirection is Query;
+
+                annotation { "Name" : "End magnitude" }
+                isReal(definition.endMagnitude, CLAMP_MAGNITUDE_REAL_BOUNDS);
+
+                annotation { "Name" : "Opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.oppositeDirectionEnd is boolean;
+
+                annotation { "Name" : "Match curvature at end" }
+                definition.matchEndCurvature is boolean;
+
+                annotation { "Name" : "Has start direction", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                definition.hasStartDirection is boolean;
+
+                annotation { "Name" : "Has end direction", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                definition.hasEndDirection is boolean;
+
+            }
+
+            annotation { "Name" : "Keep points" }
+            definition.keepPoints is boolean;
+        }
+    }
+    {
+
+        // what type of reference, if any, is selected for the active point. Output is a map of booleans for all selection types for easy use later.
+        const refType = getEntityTypeBooleans(context, definition.vertices[definition.pointIndex].referenceSelection);
+
+        // getting a location and base plane for the active vertex
+        const pointInfo = getPointInfo(definition.vertices[definition.pointIndex], context, refType);
+
+        // moving this wordy stuff to short constants so it is simpler to type and read
+        const creationMode = definition.mode == freeformSplineModeType.Create;
+        const insertMode = definition.mode == freeformSplineModeType.Insert;
+        const deleteMode = definition.mode == freeformSplineModeType.Delete;
+
+        var allPoints = createFreeSplinePointsList(context, definition);
+
+        var points = deduplicatePoints(allPoints); // remove duplicate points that overlap
+
+        //// Error message handling ////
+        reportFeatureInfo(context, id, getFreeformErrorMessages(context, definition, points));
+
+        if (definition.degree > size(points) - 1 && definition.creationType == freeformSplineCreationType.bSpline && !definition.singleSpan)
+        {
+            var degreeMax = size(points) - 1;
+            reportFeatureWarning(context, id, "The curve degree must be less than the number of points minus one. (Degree " ~ degreeMax ~ ")");
+        }
+
+        //optionally add usable opPoints for later reference
+        if (definition.keepPoints)
+        {
+            var pointSize = size(points);
+            if (definition.closed)
+            {
+                pointSize = size(points) - 1;
+            }
+            for (var i = 0; i < pointSize; i += 1)
+            {
+                opPoint(context, id + "point" + i, {
+                            "point" : points[i]
+                        });
+            }
+        }
+
+        const fitSplineDefn = getFreeSplineThroughPointsDefinition(context, id, points, definition);
+
+        var resultingCurve = qNothing();
+
+        if (size(definition.vertices) > 1 && allPoints[0] != allPoints[1])
+        {
+            // saying which vertex is active
+            if (creationMode)
+            {
+                reportFeatureInfo(context, id, "Vertex " ~ toString(definition.pointIndex + 1) ~ " is active");
+            }
+
+            // create a fit spline through points
+            if (definition.creationType == freeformSplineCreationType.Interpolate)
+            {
+
+                if (definition.closed)
+                {
+                    points = append(points, points[0]); // if closed, add the first point to the end.
+                }
+
+                try silent
+                {
+                    opFitSpline(context, id + "fitSpline1", {
+                                "points" : points,
+                                "startDerivative" : fitSplineDefn.startDerivative,
+                                "endDerivative" : fitSplineDefn.endDerivative,
+                                "start2ndDerivative" : fitSplineDefn.start2ndDerivative,
+                                "end2ndDerivative" : fitSplineDefn.end2ndDerivative
+                            });
+                    resultingCurve = qCreatedBy(id + "fitSpline1", EntityType.EDGE);
+                }
+                catch (error)
+                {
+                    reportFeatureWarning(context, id, "Fit spline failed. Check for overlapping points or self-intersections.");
+                }
+            }
+
+            // create a b-spline with points as controls
+            if (definition.creationType == freeformSplineCreationType.bSpline)
+            {
+                const bSplinePoints = points;
+
+                // get an array of point weights
+                var weights = [];
+                for (var vertex in definition.vertices)
+                {
+                    weights = append(weights, vertex.weight);
+                }
+
+                var degree = definition.degree;
+                if (definition.singleSpan)
+                {
+                    degree = size(bSplinePoints) - 1;
+                    if (size(bSplinePoints) >= 15)
+                    {
+                        degree = 15;
+                        reportFeatureInfo(context, id, "Cannot keep curve single span. Curve degree maximum is 15.");
+                    }
+                }
+
+                if (definition.displayControl)
+                {
+                    if (definition.closed)
+                    {
+                        points = append(points, points[0]); // if closed, add the first point to the end.
+                    }
+                    displayControlPolygon(context, points);
+                }
+
+                try
+                {
+                    var bSplineCurve = bSplineCurve({
+                            "degree" : degree,
+                            "isPeriodic" : definition.closed,
+                            "controlPoints" : bSplinePoints,
+                            "weights" : weights
+                        });
+                    opCreateBSplineCurve(context, id + "bSplineCurve1", {
+                                "bSplineCurve" : bSplineCurve
+                            });
+                    resultingCurve = qCreatedBy(id + "bSplineCurve1", EntityType.EDGE);
+                }
+            }
+
+            // create a polyline with points at corners
+            if (definition.creationType == freeformSplineCreationType.Polyline)
+            {
+                definition.points = points;
+
+                const lastIsDuplicate = tolerantEquals(definition.points[size(definition.points) - 1], definition.points[size(definition.points) - 2]);
+                if (lastIsDuplicate)
+                    definition.points = resize(definition.points, size(definition.points) - 1);
+
+                if (size(definition.points) >= 3)
+                {
+
+                    definition.pointSets = getArcPointSets(context, definition);
+
+                    createLinesFromPointSets(context, id, definition);
+
+                    createArcsFromPointSets(context, id, definition);
+
+                    const polyLineSketchEdges = qUnion([qCreatedBy(id + "arcSketch", EntityType.EDGE), qCreatedBy(id + "lineSketch", EntityType.EDGE)]);
+                    const polyLineFilletCenters = qUnion([qCreatedBy(id + "arcSketch", EntityType.BODY), qCreatedBy(id + "lineSketch", EntityType.BODY)])->qBodyType(BodyType.POINT);
+
+                    if (!isQueryEmpty(context, polyLineFilletCenters))
+                        addDebugEntities(context, polyLineFilletCenters, DebugColor.MAGENTA);
+
+                    var hasZeroRadiusFillet = false;
+                    for (var pointSet in definition.pointSets)
+                    {
+                        hasZeroRadiusFillet = tolerantEquals(pointSet.radius, 0 * meter);
+                        if (hasZeroRadiusFillet)
+                        {
+                            if (definition.fitSpline)
+                            {
+                                reportFeatureInfo(context, id, "Cannot create single spline if points have a radius of zero.");
+                            }
+                            break;
+                        }
+                    }
+
+                    if (definition.filletAll && definition.fitSpline && !hasZeroRadiusFillet)
+                    {
+                        opSplineThroughEdges(context, id + "polyline" + "splineThroughEdges1", {
+                                    "edges" : polyLineSketchEdges
+                                });
+                    }
+                    else
+                    {
+                        opExtractWires(context, id + "polyline" + "opExtractWires1", {
+                                    "edges" : polyLineSketchEdges
+                                });
+                    }
+                    opDeleteBodies(context, id + "deleteBodies1", {
+                                "entities" : qUnion([qCreatedBy(id + "arcSketch"), qCreatedBy(id + "lineSketch")])
+                            });
+                }
+                else
+                {
+                    opFitSpline(context, id + "polyline" + "fitSpline1", {
+                                "points" : points
+                            });
+                }
+
+                resultingCurve = qCreatedBy(id + "polyline", EntityType.EDGE);
+            }
+
+            // setting attribute to curve for the custom table
+            if (resultingCurve != qNothing())
+            {
+                setAttribute(context, {
+                            "entities" : resultingCurve,
+                            "name" : "freeformSpline",
+                            "attribute" : {
+                                "featureId" : id + "fitSpline1"
+                            }
+                        });
+            }
+        }
+
+        // add manipulators and some messages
+        if (creationMode)
+        {
+            const referenceSelection = definition.vertices[definition.pointIndex].referenceSelection;
+
+            // Manipulator functions
+            const START_MANIPULATOR = "startManipulator";
+            const END_MANIPULATOR = "endManipulator";
+
+            // Picking the same factor as used in the sketch.
+            const MANIPULATOR_SCALE_FACTOR = 3;
+
+            // if it's a closed curve we don't want to double up manipulators on the start/end
+            var manipPoints = definition.closed ? resize(points, size(points) - 1) : points;
+            var pointManip = pointsManipulator({
+                    "points" : manipPoints,
+                    "index" : definition.pointIndex
+                });
+
+            // if something is selected
+            if (!refType.isNothing)
+            {
+                if (refType.isEdge)
+                {
+                    var tanLine = evEdgeTangentLine(context, {
+                            "edge" : definition.vertices[definition.pointIndex].referenceSelection,
+                            "parameter" : definition.vertices[definition.pointIndex].curveParameter
+                        });
+                    var tanPoint = tanLine.origin;
+                    var tanManipDirection = tanLine.direction;
+
+                    var tanManip = linearManipulator({
+                            "base" : tanPoint,
+                            "direction" : tanManipDirection,
+                            "offset" : 0 * meter,
+                            "style" : ManipulatorStyleEnum.TANGENTIAL
+                        });
+
+                    addManipulators(context, id, { "tanManip" : tanManip });
+                }
+
+                if (refType.isPlanarFace || refType.isNonPlanarFace)
+                {
+                    var zOffset = refType.isPlanarFace ? definition.vertices[definition.pointIndex].Z : definition.vertices[definition.pointIndex].normalDistance;
+                    var faceManip = faceTangentManipulator(context, definition, pointInfo.plane, zOffset);
+                    addManipulators(context, id, faceManip);
+
+                }
+            }
+
+            // If nothing is selected or it's a point then use use a triad manipulator.
+            if (refType.isNothing || refType.isVertex || refType.isMateConnector)
+            {
+                var triManipOffset = allPoints[definition.pointIndex];
+                var triManip = triadManipulator({
+                        "base" : vector(0, 0, 0) * meter,
+                        "offset" : triManipOffset
+                    });
+                addManipulators(context, id, { "triManip" : triManip });
+            }
+
+
+            // add the point manipulators.
+            addManipulators(context, id, { "pointManip" : pointManip });
+        }
+        else if (insertMode)
+        {
+            reportFeatureInfo(context, id, "Click points in the viewport to add them to the curve. Switch back to create mode when done.");
+
+            // debugging the existing geometry
+            for (var point in points)
+            {
+                addDebugPoint(context, point, DebugColor.MAGENTA);
+            }
+            // addDebugEntities(context, resultingCurve, DebugColor.MAGENTA);
+
+            var intermediatePoints = getIntermediatePoints(context, points, definition.creationType == freeformSplineCreationType.Interpolate, resultingCurve);
+
+            var intermediatePointsManip = pointsManipulator({
+                    "points" : intermediatePoints,
+                    "index" : -1 // so none are selected
+                });
+
+            // add the point manipulators.
+            addManipulators(context, id, { "intermediatePointsManip" : intermediatePointsManip });
+        }
+        else if (deleteMode)
+        {
+            reportFeatureInfo(context, id, "Click points in the viewport to remove them from the curve. Switch back to create mode when done.");
+
+            var deleteManip = pointsManipulator({
+                    "points" : points,
+                    "index" : -1 // no none are selected
+                });
+
+            // add the point manipulators.
+            addManipulators(context, id, { "deleteManip" : deleteManip });
+        }
+    });
+
+
+export function freeSplineEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    // if it's a new feature, go ahead and add the first point on the origin instead of making the user add it.
+    if (isCreating && definition.newFeature)
+    {
+        definition.newFeature = false;
+        definition.vertices = [{ X : 0 * meter, Y : 0 * meter, Z : 0 * meter, arrayPointIndex : 1, curveParameter : 0.5, referenceType : ReferenceType.isNothing, referenceSelection : qNothing() }];
+        return definition;
+    }
+
+    // set the index for each point for naming them.
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        definition.vertices[i].arrayPointIndex = i + 1;
+    }
+
+    // top "if" prevents errors from checking size of "undefined".
+    if (definition.vertices is array && oldDefinition.vertices is array)
+    {
+        // if a point is removed such that the array index falls off the end,
+        if (size(definition.vertices) - 1 < oldDefinition.pointIndex)
+        {
+            //select the last point in the array.
+            definition.pointIndex = size(definition.vertices) - 1;
+
+            // without this return, it doesn't work as intended.
+            return definition;
+        }
+
+        //if a new point is added,
+        if (size(definition.vertices) > size(oldDefinition.vertices))
+        {
+            //select the new point.
+            definition.pointIndex = size(definition.vertices) - 1;
+
+            return definition;
+        }
+
+        // a loop for changing parameters of an individual point array.
+        for (var i = 0; i < min(size(oldDefinition.vertices), size(definition.vertices)); i += 1)
+        {
+            // if any point is edited from the UI,
+            if (oldDefinition.vertices[i] != definition.vertices[i] && !definition.manipChangedPointsList)
+            {
+                // select the edited point by changing the hidden index UI param.
+                definition.pointIndex = i;
+
+                const oldSelection = oldDefinition.vertices[i].referenceSelection;
+                const oldRefType = getEntityTypeBooleans(context, oldSelection);
+
+                const newSelection = definition.vertices[i].referenceSelection;
+                const refType = getEntityTypeBooleans(context, newSelection);
+
+                // if there's no selection,
+                if (refType.isNothing)
+                {
+                    // set the hidden enum to set the UI
+                    definition.vertices[i].refType = ReferenceType.isNothing;
+                }
+
+                // if a reference is selected,
+                if (oldSelection.subqueries != newSelection.subqueries && !refType.isNothing)
+                {
+
+                    //set the xyz offset to zero.
+                    definition.vertices[i].X = 0 * meter;
+                    definition.vertices[i].Y = 0 * meter;
+                    definition.vertices[i].Z = 0 * meter;
+
+                    // if the reference is a vertex
+                    if (refType.isVertex || refType.isMateConnector) // keeping these together for now, since I'm treating MCs like points. Maybe I'll treat them like planar faces later.
+                    {
+                        // set the hidden enum to set the UI
+                        definition.vertices[i].refType = ReferenceType.isVertex;
+                    }
+
+                    // if the reference is an edge or face. grouped since we want to snap to the closest point for them all.
+                    if (refType.isEdge || refType.isPlanarFace || refType.isNonPlanarFace)
+                    {
+                        // if it's a planar face, use the evaluated plane so we get lengths instead of uv params
+                        const side1Item = refType.isPlanarFace ? evPlane(context, { "face" : newSelection }) : newSelection;
+
+                        //snap to the closest point.
+                        var oldPoint = getPointInfo(oldDefinition.vertices[i], context, oldRefType).point;
+
+                        var distanceResult is DistanceResult = evDistance(context, { "side0" : oldPoint, "side1" : side1Item });
+                        var newParam = distanceResult.sides[1].parameter;
+
+                        if (refType.isEdge)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isEdge;
+
+                            // set the curve param
+                            definition.vertices[i].curveParameter = newParam;
+                        }
+
+                        if (refType.isPlanarFace)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isPlanarFace;
+
+                            // set the XYZ dims relative to the planar face
+
+
+                            definition.vertices[i].X = newParam[0];
+                            definition.vertices[i].Y = newParam[1];
+                            definition.vertices[i].Z = 0 * inch;
+
+                        }
+
+                        if (refType.isNonPlanarFace)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isNonPlanarFace;
+
+                            // set the face param
+                            definition.vertices[i].uParam = newParam[0];
+                            definition.vertices[i].vParam = newParam[1];
+                            definition.vertices[i].normalDistance = 0 * inch;
+
+                        }
+                    }
+                }
+
+
+                // if a point reference is de-selected (old selection isn't empty, and new one is)
+                if (!isQueryEmpty(context, oldSelection) && isQueryEmpty(context, newSelection) && !definition.manipChangedPointsList)
+                {
+                    // set the hidden enum to set the UI
+                    definition.vertices[i].refType = ReferenceType.isNothing;
+
+                    // make the xyz equal to the point's world coordinates plus the old offset (i.e. keep the point where it was)
+                    var oldPoints = createFreeSplinePointsList(context, oldDefinition);
+                    var oldLocation = oldPoints[i];
+
+                    definition.vertices[i].X = oldLocation[0];
+                    definition.vertices[i].Y = oldLocation[1];
+                    definition.vertices[i].Z = oldLocation[2];
+                }
+            }
+        }
+        definition.hasStartDirection = false;
+        definition.hasEndDirection = false;
+        definition.manipChangedPointsList = false;
+
+        if (specifiedParameters.startDirection && size(evaluateQuery(context, definition.startDirection)) > 0)
+        {
+            definition.hasStartDirection = true;
+        }
+
+        if (specifiedParameters.endDirection && size(evaluateQuery(context, definition.endDirection)) > 0)
+        {
+            definition.hasEndDirection = true;
+        }
+        return definition;
+    }
+}
+
+export function freeformManipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+    var points = createFreeSplinePointsList(context, definition);
+
+    // if the user clicks a point manipulator
+    if (newManipulators["pointManip"] is map)
+    {
+        definition.pointIndex = newManipulators["pointManip"].index;
+    }
+
+    // if the user moves a triad manipulator
+    if (newManipulators["triManip"] is map)
+    {
+        var reference;
+        var references = [];
+        for (var i = 0; i < size(definition.vertices); i += 1)
+        {
+
+            var vertex = definition.vertices[i];
+
+            var refType = getEntityTypeBooleans(context, vertex.referenceSelection);
+
+            if (!refType.isNothing)
+            {
+                if (refType.isVertex || refType.isMateConnector)
+                {
+                    reference = evVertexPoint(context, {
+                                "vertex" : vertex.referenceSelection
+                            });
+                }
+                if (refType.isEdge)
+                {
+                    reference = evEdgeTangentLine(context, {
+                                    "edge" : vertex.referenceSelection,
+                                    "parameter" : vertex.curveParameter
+                                }).origin;
+                }
+            }
+            else
+            {
+                reference = zeroVector(3) * meter;
+            }
+            references = append(references, reference);
+        }
+
+        const triOffset = newManipulators["triManip"].offset - references[definition.pointIndex];
+        definition.vertices[definition.pointIndex].X = triOffset[0];
+        definition.vertices[definition.pointIndex].Y = triOffset[1];
+        definition.vertices[definition.pointIndex].Z = triOffset[2];
+    }
+
+    // if the user moves an edge manipulator
+    if (newManipulators["tanManip"] is map)
+    {
+        var m = newManipulators["tanManip"];
+        var pos = m.base + m.direction * m.offset;
+        var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.vertices[definition.pointIndex].referenceSelection });
+        var newParam = distanceResult.sides[1].parameter;
+        definition.vertices[definition.pointIndex].curveParameter = newParam;
+    }
+
+    if (newManipulators["xFaceTanManip"] is map || newManipulators["yFaceTanManip"] is map || newManipulators["zFaceTanManip"] is map)
+    {
+        definition = processFaceTangentManipulator(context, definition, newManipulators);
+        return definition;
+    }
+
+
+    // if the user moves a face manipulator
+    if (newManipulators["xFaceTanManip"] is map || newManipulators["yFaceTanManip"] is map)
+    {
+        var m = newManipulators["xFaceTanManip"] is map ? newManipulators["yFaceTanManip"] : newManipulators["yFaceTanManip"];
+        var pos = m.base + m.direction * m.offset;
+        var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.reference });
+        var newParam = distanceResult.sides[1].parameter;
+        definition.uParam = newParam[0];
+        return definition;
+    }
+
+    // show points for Insert mode
+    if (newManipulators["intermediatePointsManip"] is map)
+    {
+        var manipIndex = newManipulators["intermediatePointsManip"].index;
+        var arrayPointIndex = manipIndex + 1; // +1 because index 0 of the intermediate points should be index 1 when added to the full list of points.
+        var newPoint = newManipulators["intermediatePointsManip"].points[manipIndex];
+        var newVertexDefinition = newVertexDefaultDefinition;
+    
+        newVertexDefinition.X = newPoint[0];
+        newVertexDefinition.Y = newPoint[1];
+        newVertexDefinition.Z = newPoint[2];
+        newVertexDefinition.arrayPointIndex = arrayPointIndex;
+        
+        definition.vertices = insertIntoArray(definition.vertices, newVertexDefinition, arrayPointIndex);
+        definition.manipChangedPointsList = true;
+        return definition;
+    }
+
+    // points for delete mode
+    if (newManipulators["deleteManip"] is map)
+    {
+        var manipIndex = newManipulators["deleteManip"].index;
+        definition.vertices = deleteArrayItems(definition.vertices, [manipIndex]);
+        definition.manipChangedPointsList = true;
+        return definition;
+
+    }
+
+    // End condition Manipulator functions
+    const START_MANIPULATOR = "startManipulator";
+    const END_MANIPULATOR = "endManipulator";
+
+    // Picking the same factor as used in the sketch.
+    const MANIPULATOR_SCALE_FACTOR = 3;
+
+    const startManipulator = newManipulators[START_MANIPULATOR];
+    const endManipulator = newManipulators[END_MANIPULATOR];
+
+
+
+    var xArray = [];
+    var yArray = [];
+    var zArray = [];
+
+    for (var i = 0; i < size(points); i += 1)
+    {
+        var point = points[i];
+        xArray = append(xArray, point[0]);
+        yArray = append(yArray, point[1]);
+        zArray = append(zArray, point[2]);
+    }
+
+    const boundingBox = {
+            "minCorner" : vector(min(xArray), min(yArray), min(zArray)),
+            "maxCorner" : vector(max(xArray), max(yArray), max(zArray)),
+        };
+
+    const totalSpan = norm(boundingBox.maxCorner - boundingBox.minCorner);
+    const oppositeDirectionStart = definition.oppositeDirectionStart ? -1 : 1;
+    const oppositeDirectionEnd = definition.oppositeDirectionEnd ? -1 : 1;
+
+    if (startManipulator != undefined)
+    {
+        definition.startMagnitude = startManipulator.offset * MANIPULATOR_SCALE_FACTOR / totalSpan * oppositeDirectionStart;
+    }
+
+    if (endManipulator != undefined)
+    {
+        definition.endMagnitude = endManipulator.offset * MANIPULATOR_SCALE_FACTOR / totalSpan * oppositeDirectionEnd;
+    }
+
+    // if manip does anything except add a point, say make this false so unwanted things don't happen in Editing Logic
+    definition.manipChangedPointsList = false;
+
+    return definition;
+}
+
+export function createFreeSplinePointsList(context is Context, definition is map) returns array
+{
+    var points = [];
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        var refType = getEntityTypeBooleans(context, vertex.referenceSelection);
+
+
+        var point = getPointInfo(vertex, context, refType).point;
+        points = append(points, point);
+    }
+
+
+    return points;
+}
+
+// shows the control polygon for the b spline
+export function displayControlPolygon(context is Context, points is array)
+{
+    for (var i = 0; i < size(points) - 1; i += 1)
+    {
+        try silent
+        {
+            addDebugArrow(context, points[i], points[i + 1], 0 * centimeter, DebugColor.MAGENTA);
+        }
+    }
+}
+
+// finds the curve param of each point on the fit spline
+export function getPointParametersOnSpline(context is Context, points is array, spline is Query) returns array
+{
+    var pointParameters = [];
+    for (var point in points)
+    {
+        var parameter = evDistance(context, {
+                    "side0" : point,
+                    "side1" : spline
+                }).sides[1].parameter;
+
+        pointParameters = append(pointParameters, parameter);
+    }
+    return pointParameters;
+}
+
+// getting midpoints between the existing points to help create point manip locations for insert mode. If it's an interpolated spline, the midpoints are on the spline. If not, the midpoints are in-line between each set of points
+export function getIntermediatePoints(context is Context, points is array, isOnSpline is boolean, spline is Query) returns array
+{
+
+    var intermediatePoints = [];
+
+    if (isOnSpline) // finding the midpoint between two points on the spline via averaged parameter values
+    {
+        var pointParameters = getPointParametersOnSpline(context, points, spline);
+
+        for (var i = 0; i < size(points) - 1; i += 1)
+        {
+            var averageParameter = (pointParameters[i] + pointParameters[i + 1]) / 2;
+            var intermediatePoint = evEdgeTangentLine(context, {
+                        "edge" : spline,
+                        "parameter" : averageParameter
+                    }).origin;
+            intermediatePoints = append(intermediatePoints, intermediatePoint);
+        }
+    }
+    else // finding the midpoint between two points in world space via averaged coordinate values
+    {
+        for (var i = 0; i < size(points) - 1; i += 1)
+        {
+            var A = points[i];
+            var B = points[i + 1];
+            var intermediatePoint = vector((A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2);
+            intermediatePoints = append(intermediatePoints, intermediatePoint);
+        }
+    }
+
+    return intermediatePoints;
+}
+
+// inserts a new item into an array at a specified index, increasing the array size by one.
+export function insertIntoArray(theArray is array, itemToInsert, index is number) returns array
+{
+    var newArray = makeArray(size(theArray) + 1);
+    var offset = 0;
+    for (var i = 0; i < size(newArray); i += 1)
+    {
+        if (i == index)
+        {
+            newArray[i] = itemToInsert;
+            offset = 1;
+        }
+        else
+        {
+            newArray[i] = theArray[i - offset];
+        }
+    }
+    return newArray;
+}
+
+export function deleteArrayItems(theArray is array, indicesToDelete is array) returns array
+{
+    var newArray = [];
+    for (var i = 0; i < size(theArray); i += 1)
+    {
+        if (isIn(i, indicesToDelete))
+        {
+            continue;
+        }
+        else
+        {
+            newArray = append(newArray, theArray[i]);
+        }
+    }
+    return newArray;
+}
+
+annotation { "Table Type Name" : "Freeform Spline Lengths", "Icon" : icon::BLOB_DATA }
+export const freeformSplineLengths = defineTable(function(context is Context, definition is map) returns Table
+    precondition
+    {
+    }
+    {
+        var columns = [];
+        const curveColumnName = "curveName";
+        const featureNameColumnName = "featureName";
+        const lengthColumnName = "length";
+        columns = append(columns, tableColumnDefinition(curveColumnName, "Curve"));
+        // columns = append(columns, tableColumnDefinition(featureNameColumnName, "Feature"));
+        columns = append(columns, tableColumnDefinition(lengthColumnName, "Length"));
+
+        var rows = [];
+
+        var entitiesWithFreeformSplineAttribute = evaluateQuery(context, qHasAttribute("freeformSpline"));
+
+        for (var curve in entitiesWithFreeformSplineAttribute)
+        {
+            var length = evLength(context, {
+                    "entities" : curve
+                });
+            const curveName = getProperty(context, {
+                        "entity" : qOwnerBody(curve),
+                        "propertyType" : PropertyType.NAME
+                    });
+
+            var row = { (curveColumnName) : curveName, (lengthColumnName) : length };
+            rows = append(rows, tableRow(row, curve));
+        }
+        return table("Freeform Spline Lengths", columns, rows);
+    });
+
+export function getFreeformErrorMessages(context is Context, definition is map, points is array) returns string
+{
+    var message;
+
+    points = createFreeSplinePointsList(context, definition);
+
+    if (size(points) < 2)
+    {
+        message = freeformMessage.tooFewPoints;
+        return message;
+    }
+
+    // the last two points are coincident
+    const coincidentPoints = points[size(points) - 1] == points[size(points) - 2] && !definition.closed;
+
+    // the last point is active
+    const lastPointActive = definition.pointIndex == size(points) - 1;
+
+    // if there's one or less points (usually on feature creation)
+    if (size(points) >= 1)
+    {
+        message = freeformMessage.newFeature;
+        return message;
+    }
+    else if (coincidentPoints && lastPointActive)
+    {
+        message = freeformMessage.overlappingEndpointsActive;
+        return message;
+    }
+    else if (coincidentPoints && !lastPointActive)
+    {
+        message = freeformMessage.overlappingEndpointsInactive;
+        return message;
+    }
+    else
+    {
+        message = "Vertex " ~ toString(definition.pointIndex + 1) ~ " is active";
+        return message;
+    }
+}
+
+/**
+ * Takes an array of vectors and returns it with duplicates removed.
+ */
+export function deduplicatePoints(points is array) returns array
+{
+    const pointClusters = clusterPoints(points, TOLERANCE.zeroLength * meter);
+
+    var result = [];
+    for (var pointCluster in pointClusters)
+        result = append(result, points[pointCluster[0]]);
+    return result;
+}
+
+export const newVertexDefaultDefinition = { "X" : 0*meter, "Y" : 0*meter, "Z" : 0*meter, "arrayPointIndex" : 0, "cornerBlendControlType" : BlendControlType.RADIUS , "cornerRadius" : 0.005 * meter , "cornerWidth" : 0.005 *meter , "curveParameter" : 0.5 , "filletCorner" : false , "normalDistance" : 0*meter , "refType" : ReferenceType.isNothing , "referenceSelection" : qNothing() , "uParam" : 0.5 , "vParam" : 0.5 , "weight" : 1  };
