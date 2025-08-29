@@ -1,0 +1,722 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1389;
+import(path : "onshape/std/geometry.fs", version : "1389.0");
+import(path : "onshape/std/feature.fs", version : "1389.0");
+export import(path : "onshape/std/filletcrosssection.gen.fs", version : "1389.0");
+export import(path : "onshape/std/chamfertype.gen.fs", version : "1389.0");
+import(path : "onshape/std/valueBounds.fs", version : "1389.0");
+
+icon::import(path : "ba4e4393c2844bc4e6bd74b4", version : "4dd68d39b36eac9599156f51");
+
+export enum featureType
+{
+    Fillet,
+    Chamfer
+}
+
+export const QF_LENGTH_BOUNDS =
+{
+            (meter) : [0, 0.025, 500],
+            (centimeter) : 2.5,
+            (millimeter) : .3,
+            (inch) : .01,
+            (foot) : 0.1,
+            (yard) : 0.025
+        } as LengthBoundSpec;
+
+export const MIN_LENGTH_BOUNDS =
+{
+            (meter) : [0, 0.025, 500],
+            (centimeter) : .1,
+            (millimeter) : 1,
+            (inch) : .125,
+            (foot) : 0.1,
+            (yard) : 0.025
+        } as LengthBoundSpec;
+
+
+export enum selectionType
+{
+    annotation { "Name" : "Edge" }
+    EDGE,
+    annotation { "Name" : "Face" }
+    FACE,
+    annotation { "Name" : "Feature" }
+    FEATURE,
+    annotation { "Name" : "Body" }
+    BODY
+}
+
+export enum inclusionType
+{
+    annotation { "Name" : "Add" }
+    ADD,
+    annotation { "Name" : "Subtract" }
+    SUBTRACT,
+    annotation { "Name" : "Intersect" }
+    INTERSECT
+}
+
+export enum edgeSelection
+{
+    annotation { "Name" : "Matching" }
+    MATCHING,
+    annotation { "Name" : "Tangent connected" }
+    TANGENT,
+    annotation { "Name" : "Loop/chain connected" }
+    LOOP,
+    annotation { "Name" : "Parallel" }
+    PARALLEL,
+    annotation { "Name" : "None" }
+    NONE,
+}
+
+export enum faceSelection
+{
+    annotation { "Name" : "Matching" }
+    MATCHING,
+    annotation { "Name" : "Protrusion" }
+    PROTRUSION,
+    annotation { "Name" : "Pocket" }
+    POCKET,
+    annotation { "Name" : "Hole" }
+    HOLE,
+    annotation { "Name" : "Tangent connected" }
+    TANGENT,
+    annotation { "Name" : "Bounded faces" }
+    BOUNDED,
+    annotation { "Name" : "Parallel" }
+    PARALLEL,
+    annotation { "Name" : "None" }
+    NONE,
+
+}
+
+export enum bodySelection
+{
+    annotation { "Name" : "Convexity" }
+    CONVEXITY,
+    annotation { "Name" : "Direction" }
+    DIRECTION,
+    annotation { "Name" : "Edge length" }
+    LENGTH,
+}
+
+const CHAMFER_ANGLE_BOUNDS =
+{
+            (degree) : [0.1, 45, 179.9],
+            (radian) : 0.25 * PI
+        } as AngleBoundSpec;
+
+
+annotation { "Feature Type Name" : "Selection fillet", "Icon" : icon::BLOB_DATA }
+export const selectionFillet = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+
+        annotation { "Name" : "Feature type", "UIHint" : "HORIZONTAL_ENUM" }
+        definition.featureType is featureType;
+
+        annotation { "Name" : "Pause regeneration", "Default" : true }
+        definition.pause is boolean;
+
+        annotation { "Name" : "Build a selection", "Item name" : "Selection", "Item label template" : "Selection input", "UIHint" : "ALLOW_QUERY_ORDER" }
+        definition.seeds is array;
+        for (var seed in definition.seeds)
+        {
+
+            annotation { "Name" : "Boolean type", "UIHint" : "HORIZONTAL_ENUM", "UIHint" : "SHOW_LABEL" }
+            seed.inclType is inclusionType;
+            annotation { "Name" : "Selection seed type", "UIHint" : "HORIZONTAL_ENUM", "UIHint" : "SHOW_LABEL" }
+            seed.selType is selectionType;
+            if (seed.selType == selectionType.EDGE)
+            {
+                annotation { "Name" : "Selection method" }
+                seed.edgeSelection is edgeSelection;
+
+                if (seed.edgeSelection != edgeSelection.LOOP)
+                {
+                    annotation { "Name" : "Seed edges", "Filter" : EntityType.EDGE && EdgeTopology.TWO_SIDED, "UIHint" : "INITIAL_FOCUS" }
+                    seed.edges is Query;
+                }
+                else
+                {
+                    annotation { "Name" : "Faces forming loop", "Filter" : EntityType.FACE }
+                    seed.edgeLoop is Query;
+                }
+
+
+                //TODO add tolerance
+                // if (seed.edgeSelection == edgeSelection.MATCHING)
+                // {
+                //     annotation { "Name" : "Tolerance +/-", "UIHint" : "MATCH_LAST_ARRAY_ITEM", "UIHint" : "DISPLAY_SHORT" }
+                //     isLength(seed.lengthTol, { (millimeter) : [0, 0, 500000] } as LengthBoundSpec);
+                // }
+
+                //TODO add tolerance
+                // if (seed.edgeSelection == edgeSelection.PARALLEL)
+                // {
+                //     annotation { "Name" : "Tolerance +/-", "UIHint" : "MATCH_LAST_ARRAY_ITEM", "UIHint" : "DISPLAY_SHORT" }
+                //     isAngle(seed.parallelTol, { (degree) : [0, 0, 360] } as AngleBoundSpec);
+                // }
+
+
+            }
+            else if (seed.selType == selectionType.FACE)
+            {
+                annotation { "Name" : "Selection method" }
+                seed.faceSelection is faceSelection;
+
+                if (seed.faceSelection == faceSelection.BOUNDED)
+                {
+                    annotation { "Name" : "Bounding entities", "Filter" : EntityType.FACE || EntityType.EDGE }
+                    seed.bounding is Query;
+
+                    annotation { "Name" : "Bounded face", "Filter" : EntityType.FACE }
+                    seed.bounded is Query;
+                }
+                else
+                {
+                    annotation { "Name" : "Seed faces", "Filter" : EntityType.FACE }
+                    seed.faces is Query;
+                }
+
+                //TODO add tolerance
+                // if (seed.faceSelection == faceSelection.PARALLEL)
+                // {
+                //     annotation { "Name" : "Tolerance +/-", "UIHint" : "MATCH_LAST_ARRAY_ITEM", "UIHint" : "DISPLAY_SHORT" }
+                //     isAngle(seed.parallelFaceTol, { (degree) : [0, 0, 360]} as AngleBoundSpec);
+                // }
+
+            }
+            else if (seed.selType == selectionType.BODY)
+            {
+                annotation { "Name" : "Selection method" }
+                seed.bodySelection is bodySelection;
+                annotation { "Name" : "Bodies to fillet", "Filter" : EntityType.BODY }
+                seed.bodies is Query;
+
+                if (seed.bodySelection == bodySelection.CONVEXITY)
+                {
+                    annotation { "Name" : "Convex edges", "Default" : true }
+                    seed.convex is boolean;
+                    annotation { "Name" : "Concave edges", "Default" : true }
+                    seed.concave is boolean;
+                }
+
+                else if (seed.bodySelection == bodySelection.DIRECTION)
+                {
+                    annotation { "Name" : "Direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                    seed.direction is Query;
+                    annotation { "Name" : "Tolerance" }
+                    isAngle(seed.directionTol, { (degree) : [0, 3, 360] } as AngleBoundSpec);
+                }
+
+                else if (seed.bodySelection == bodySelection.LENGTH)
+                {
+
+                    // May want to move min/max length to a "final cleanup" section outside of the array
+                    annotation { "Name" : "Minimum length", "UIHint" : "DISPLAY_SHORT" }
+                    seed.minLengthBool is boolean;
+                    annotation { "Name" : "Minimum length", "UIHint" : "DISPLAY_SHORT" }
+                    isLength(seed.minLength, MIN_LENGTH_BOUNDS);
+
+                    annotation { "Name" : "Maximum length", "UIHint" : "DISPLAY_SHORT" }
+                    seed.maxLengthBool is boolean;
+                    annotation { "Name" : "Maximum length", "UIHint" : "DISPLAY_SHORT" }
+                    isLength(seed.maxLength, MIN_LENGTH_BOUNDS);
+                }
+            }
+            else if (seed.selType == selectionType.FEATURE)
+            {
+                annotation { "Name" : "Parent features" }
+                seed.features is FeatureList;
+
+                annotation { "Name" : "Cap edges", "Default" : true }
+                seed.capEntitiesBool is boolean;
+
+                annotation { "Name" : "Non cap edges", "Default" : true }
+                seed.nonCapEntitiesBool is boolean;
+
+            }
+        }
+
+        // TODO add "Clean up selection" param group////
+        // MIN LENGTH and MIN GAP (but not touching)
+        //(maybe make the gap a function of definition.radius)
+        // maybe have a simple "similarity index" which wraps a lot of comparrisons into one thing, like length, curve type, and curvature at a few points.
+        if (definition.featureType == featureType.Fillet)
+        {
+            annotation { "Name" : "Cross section" }
+            definition.section is FilletCrossSection;
+            annotation { "Name" : "Radius", "UIHint" : "REMEMBER_PREVIOUS_VALUE" }
+            isLength(definition.radius, QF_LENGTH_BOUNDS);
+            if (definition.section == FilletCrossSection.CONIC)
+            {
+                annotation { "Name" : "Rho" }
+                isReal(definition.rho, { (unitless) : [0, 0.5, 1] } as RealBoundSpec);
+            }
+            else if (definition.section == FilletCrossSection.CURVATURE)
+            {
+                annotation { "Name" : "Magnitude" }
+                isReal(definition.magnitude, { (unitless) : [0, 0.5, 1] } as RealBoundSpec);
+            }
+
+            if (definition.section != FilletCrossSection.CURVATURE)
+            {
+                annotation { "Name" : "Allow Edge Overflow" }
+                definition.overflow is boolean;
+            }
+        }
+        else if (definition.featureType == featureType.Chamfer)
+        {
+            if (definition.chamferType != undefined)
+            {
+                annotation { "Name" : "Chamfer type" }
+                definition.chamferType is ChamferType;
+            }
+
+            //first quantity input (length)
+            if (definition.chamferType != ChamferType.TWO_OFFSETS)
+            {
+                annotation { "Name" : "Distance" }
+                isLength(definition.width, BLEND_BOUNDS);
+            }
+            else
+            {
+                annotation { "Name" : "Distance 1" }
+                isLength(definition.width1, BLEND_BOUNDS);
+            }
+
+            //opposite direction button
+            if (definition.chamferType == ChamferType.OFFSET_ANGLE ||
+                definition.chamferType == ChamferType.TWO_OFFSETS)
+            {
+                annotation { "Name" : "Opposite direction", "Default" : false, "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.oppositeDirection is boolean;
+            }
+
+            //second quantity input (length or angle depending on type)
+            if (definition.chamferType == ChamferType.TWO_OFFSETS)
+            {
+                annotation { "Name" : "Distance 2" }
+                isLength(definition.width2, BLEND_BOUNDS);
+            }
+            else if (definition.chamferType == ChamferType.OFFSET_ANGLE)
+            {
+                annotation { "Name" : "Angle" }
+                isAngle(definition.angle, CHAMFER_ANGLE_BOUNDS);
+            }
+        }
+
+        annotation { "Name" : "Tangent propagation", "Default" : true }
+        definition.tangentPropagation is boolean;
+    }
+
+    // END UI. LET'S DO THIS THING (execute feature) //
+    {
+        // DO I NEED THESE HERE OR CAN I DECLARE IN THE FOR LOOP?
+        var runningQuery = qNothing();
+        var tangentConEdges;
+        var matchingEdges;
+        var parallelEdges;
+        var loopFaces;
+        var loopEdges;
+        var matchingFaces;
+        var parallelFaces;
+        var protrusion;
+        var pocket;
+        var hole;
+        var boundedFace;
+        var bounding;
+        var tangentFaces;
+        var faceBoundary;
+        var concaveEdges;
+        var convexEdges;
+        var featureEdges;
+        var featureFaces;
+        var featureCapEdges;
+        var featureNonCapEdges;
+
+        // pre loop vars
+
+        var ownerBody;
+        var ownerEdges;
+        var ownerFaces;
+        var bodyEdges;
+        var bodyEdgesArray;
+        var direction;
+        var directionTol;
+        var directionEdges;
+        var underMin; /* body edges are too short */
+        var overMax; /* body edges are too long */
+        var seeds;
+        var edges;
+        var edgesArray;
+        var faces;
+        var selectedFaces;
+        var faceQuery;
+        var faceEdges;
+        var bodies;
+        var bodiesArray;
+        var features;
+        var select;
+        var edgeSel;
+        var faceSel;
+        var bodySel;
+        var bounded;
+        var selectionQuery = [];
+        var mainCount = size(definition.seeds);
+
+        // Start for loop for main array parameter
+        for (var i = 0; i < mainCount; i += 1)
+        {
+            // reset all query variables
+            edges = qNothing();
+            faces = qNothing();
+            tangentConEdges = qNothing();
+            matchingEdges = qNothing();
+            parallelEdges = qNothing();
+            loopFaces = qNothing();
+            loopEdges = qNothing();
+            selectedFaces = qNothing();
+            matchingFaces = qNothing();
+            parallelFaces = qNothing();
+            protrusion = qNothing();
+            pocket = qNothing();
+            hole = qNothing();
+            boundedFace = qNothing();
+            bounding = qNothing();
+            bounded = qNothing();
+            tangentFaces = qNothing();
+            faceBoundary = qNothing();
+            faceQuery = qNothing();
+            faceEdges = qNothing();
+            concaveEdges = qNothing();
+            convexEdges = qNothing();
+            bodyEdges = qNothing();
+            directionEdges = qNothing();
+            convexEdges = qNothing();
+            concaveEdges = qNothing();
+            featureEdges = qNothing();
+
+            // process user selections
+            seeds = definition.seeds[i]; /* finds one "Add Selection" instance with all UI selections therein (map). Now "seeds.[anything]" already has "i" included*/
+            bodies = seeds.bodies;
+            bodiesArray = evaluateQuery(context, bodies);
+            features = seeds.features;
+            featureCapEdges = seeds.capEntitiesBool;
+            featureNonCapEdges = seeds.nonCapEntitiesBool;
+            select = seeds.inclType; /*ADD, SUBTRACT, or INTERSECT*/
+            edgeSel = seeds.edgeSelection; /* egde slection type */
+            faceSel = seeds.faceSelection; /* face slection type */
+            bodySel = seeds.bodySelection; /* body slection type */
+            direction = extractDirection(context, seeds.direction);
+            directionTol = seeds.directionTol;
+            loopFaces = seeds.edgeLoop;
+            boundedFace = seeds.bounded;
+            bounding = seeds.bounding;
+
+            // Edge selection operations
+            if (seeds.selType == selectionType.EDGE)
+            {
+                edges = seeds.edges; /* filter the query for all edges selected in one selection box (query) */
+                edgesArray = evaluateQuery(context, edges); /* eval the edge query to get an array of individual edges (array) */
+                ownerBody = qOwnerBody(edges);
+                ownerEdges = qOwnedByBody(ownerBody, EntityType.EDGE);
+
+                if (edgeSel == edgeSelection.TANGENT)
+                {
+                    tangentConEdges = qTangentConnectedEdges(edges);
+                }
+                else if (edgeSel == edgeSelection.LOOP)
+                {
+                    loopEdges = qLoopEdges(loopFaces);
+                }
+                else if (edgeSel == edgeSelection.PARALLEL)
+                {
+                    parallelEdges = qParallelEdges(ownerEdges, edges);
+                }
+                else if (edgeSel == edgeSelection.MATCHING)
+                {
+                    matchingEdges = qMatching(edges);
+                }
+            }
+            // Face selection operations
+            if (seeds.selType == selectionType.FACE)
+                faces = seeds.faces; /* filter the query for all faces selected in one selection box (query) */
+            selectedFaces = faces;
+            {
+                if (faceSel == faceSelection.MATCHING)
+                {
+                    matchingFaces = qMatching(faces);
+                }
+                else if (faceSel == faceSelection.TANGENT)
+                {
+                    tangentFaces = qTangentConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.BOUNDED)
+                {
+                    for (var face in evaluateQuery(context, boundedFace))
+                    {
+                        bounded = qUnion([bounded, qFaceOrEdgeBoundedFaces(qUnion([face, bounding]))]);
+                    }
+                }
+                else if (faceSel == faceSelection.PARALLEL)
+                {
+                    parallelFaces = [];
+                    // check each face selection against every ownerBody face
+                    for (var face in evaluateQuery(context, faces))
+                    {
+                        ownerBody = qOwnerBody(face);
+                        ownerFaces = qOwnedByBody(ownerBody, EntityType.FACE);
+                        var facePlane;
+                        try silent
+                        {
+                            facePlane = evPlane(context, {
+                                        "face" : face
+                                    });
+                            parallelFaces = append(parallelFaces, qParallelPlanes(ownerFaces, facePlane, true));
+                        }
+                    }
+                    parallelFaces = qUnion([qUnion(parallelFaces), faces]);
+                }
+                else if (faceSel == faceSelection.PROTRUSION)
+                {
+                    protrusion = qConvexConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.POCKET)
+                {
+                    pocket = qConcaveConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.HOLE)
+                {
+                    hole = qHoleFaces(faces);
+                }
+                faceQuery = qUnion([parallelFaces, matchingFaces, tangentFaces, selectedFaces, pocket, protrusion, hole, bounded]);
+                // find the loop edges for each selected face
+                faceEdges = [];
+                for (var face in evaluateQuery(context, faceQuery))
+                {
+                    faceEdges = append(faceEdges, qLoopEdges(face));
+                }
+                faceEdges = qUnion([qUnion(faceEdges), faceBoundary]);
+            }
+            // Body selection operations
+            if (seeds.selType == selectionType.BODY)
+            {
+                ownerBody = seeds.bodies;
+                bodyEdges = qOwnedByBody(ownerBody, EntityType.EDGE);
+                bodyEdgesArray = evaluateQuery(context, bodyEdges);
+
+                // find concave and convex edges
+                if (bodySel == bodySelection.CONVEXITY)
+                {
+                    if (seeds.convex)
+                    {
+                        convexEdges = [];
+                        for (var convexEdge in bodyEdgesArray)
+                        {
+                            const convexity =
+                            try silent
+(
+evEdgeConvexity(context, {
+                                            "edge" : convexEdge })
+);
+                            if (convexity == EdgeConvexityType.CONVEX)
+                            {
+                                convexEdges = append(convexEdges, convexEdge);
+                            }
+                        }
+                        convexEdges = qUnion(convexEdges);
+                    }
+                    if (seeds.concave)
+                    {
+
+                        concaveEdges = [];
+                        for (var concaveEdge in bodyEdgesArray)
+                        {
+                            const concaveity =
+                            try silent
+(
+evEdgeConvexity(context, {
+                                            "edge" : concaveEdge
+                                        })
+);
+                            if (concaveity == EdgeConvexityType.CONCAVE)
+                            {
+                                concaveEdges = append(concaveEdges, concaveEdge);
+                            }
+                        }
+                        concaveEdges = qUnion(concaveEdges);
+                    }
+                    bodyEdges = qUnion([convexEdges, concaveEdges]);
+                }
+                else if (bodySel == bodySelection.DIRECTION)
+                {
+                    directionEdges = [];
+                    for (var edge in bodyEdgesArray)
+                    {
+                        if (evCurveDefinition(context, { "edge" : edge }) is Line == true)
+                        {
+                            var angle = angleBetween(direction, extractDirection(context, edge));
+                            var negAngle = angleBetween(-direction, extractDirection(context, edge));
+                            if (angle < directionTol || negAngle < directionTol)
+                            {
+                                directionEdges = append(directionEdges, edge);
+                            }
+                        }
+                    }
+                    bodyEdges = qUnion(directionEdges);
+                }
+                else if (bodySel == bodySelection.LENGTH)
+                {
+
+                    bodyEdgesArray = [];
+                    underMin = [];
+                    overMax = [];
+                    if (seeds.minLengthBool)
+                    {
+                        for (var edge in evaluateQuery(context, bodyEdges))
+                        {
+                            if (evLength(context, {
+                                            "entities" : edge
+                                        }) <= seeds.minLength)
+                            {
+                                underMin = append(underMin, edge);
+                            }
+                        }
+                        underMin = qUnion(underMin);
+                    }
+                    else
+                    {
+                        underMin = qNothing();
+                    }
+                    if (seeds.maxLengthBool)
+                    {
+                        for (var edge in evaluateQuery(context, bodyEdges))
+                        {
+                            if (evLength(context, {
+                                            "entities" : edge
+                                        }) >= seeds.maxLength)
+                            {
+                                overMax = append(overMax, edge);
+                            }
+                        }
+                        overMax = qUnion(overMax);
+                    }
+                    else
+                    {
+                        overMax = qNothing();
+                    }
+                    bodyEdges = qSubtraction(bodyEdges, qUnion([underMin, overMax]));
+                }
+            }
+            // Feature seletion operations
+            if (seeds.selType == selectionType.FEATURE)
+            {
+                featureEdges = qCreatedBy(features, EntityType.EDGE);
+
+                // TODO add cap and non cap entities to Features
+                for (var feature in features)
+                {
+                    var capEdges = featureCapEdges ? qNothing() : qUnion([qCapEntity(feature.key, CapType.END, EntityType.EDGE), qCapEntity(feature.key, CapType.START, EntityType.EDGE)]);
+                    var nonCapEdges = featureNonCapEdges ? qNothing() : qNonCapEntity(feature.key, EntityType.EDGE);
+                    var featureEdgesToSubtract = qUnion([capEdges, nonCapEdges]);
+                    featureEdges = featureEdges->qSubtraction(featureEdgesToSubtract);
+                }
+
+            }
+
+            // add to or subtract from running query
+            selectionQuery = qUnion([edges, tangentConEdges, matchingEdges, parallelEdges, loopEdges, faceEdges, bodyEdges, featureEdges]);
+            if (select == inclusionType.ADD)
+            {
+                runningQuery = qUnion([runningQuery, selectionQuery]);
+            }
+            else if (select == inclusionType.SUBTRACT)
+            {
+                runningQuery = qSubtraction(runningQuery, selectionQuery);
+            }
+            else if (select == inclusionType.INTERSECT)
+            {
+                runningQuery = qIntersection([runningQuery, selectionQuery]);
+            }
+
+        }
+        // find tangent edges on selected edges
+        var runningQueryArray = evaluateQuery(context, runningQuery);
+        var tangentEdges = [];
+        for (var tangentEdge in runningQueryArray)
+        {
+            const tangency =
+            try silent
+(
+evEdgeConvexity(context, { "edge" : tangentEdge })
+);
+            if (tangency == EdgeConvexityType.SMOOTH)
+            {
+                tangentEdges = append(tangentEdges, tangentEdge);
+            }
+        }
+        tangentEdges = qUnion(tangentEdges);
+
+        // Either preview the selection or perform opFillet or opchamfer
+        var exclusions = qUnion([qEdgeTopologyFilter(runningQuery, EdgeTopology.LAMINAR), tangentEdges]);
+        var finalQuery = qSubtraction(runningQuery, exclusions);
+
+        var edgeCount = size(evaluateQuery(context, finalQuery));
+        var infoString;
+        if (edgeCount == 1)
+        {
+            infoString = toString(edgeCount ~ " edge selected.");
+            reportFeatureInfo(context, id, infoString);
+        }
+        else
+        {
+            infoString = toString(edgeCount ~ " edges selected.");
+            reportFeatureInfo(context, id, infoString);
+        }
+
+        if (definition.pause)
+        {
+            // multiple debugs makes it more visible or can mix colors
+            debug(context, finalQuery, DebugColor.YELLOW);
+            debug(context, finalQuery, DebugColor.CYAN);
+            debug(context, finalQuery, DebugColor.CYAN);
+            
+            reportFeatureWarning(context, id, infoString ~ " Regeneration is paused.");
+        }
+        else
+        {
+            if (definition.featureType == featureType.Fillet)
+            {
+                var overflow = definition.section == FilletCrossSection.CURVATURE ? true : definition.overflow;
+
+                opFillet(context, id, {
+                            "entities" : finalQuery,
+                            "radius" : definition.radius,
+                            "tangentPropagation" : definition.tangentPropagation,
+                            "crossSection" : definition.section,
+                            "rho" : definition.rho,
+                            "magnitude" : definition.magnitude,
+                            "allowEdgeOverflow" : overflow
+                        });
+            }
+            else if (definition.featureType == featureType.Chamfer)
+            {
+                opChamfer(context, id + "chamfer1", {
+                            "entities" : finalQuery,
+                            "chamferType" : definition.chamferType,
+                            "width" : definition.width,
+                            "width1" : definition.width1,
+                            "width2" : definition.width2,
+                            "angle" : definition.angle,
+                            "oppositeDirection" : definition.oppositeDirection,
+                            "tangentPropagation" : definition.tangentPropagation
+                        });
+            }
+        }
+    });
