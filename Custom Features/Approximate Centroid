@@ -1,0 +1,31 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1188;
+import(path : "onshape/std/geometry.fs", version : "1188.0");
+
+icon::import(path : "0aa884696a7c6d524e76512e", version : "2abc9fecfcfe37c2d13550b5");
+
+
+
+annotation { "Feature Type Name" : "Approximate Centroid", "Icon" : icon::BLOB_DATA }
+export const approximateCentroid = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Select part", "Filter" : EntityType.BODY && BodyType.SOLID || EntityType.FACE, }
+        definition.Part is Query;
+    }
+    {
+
+        var bodies = definition.Part;
+        var owner = definition.owner;
+        var centroid = evApproximateCentroid(context, {
+                "entities" : bodies
+            });
+        var coordSystem = coordSystem(centroid, X_DIRECTION, Z_DIRECTION);
+        opMateConnector(context, id + "mateConnector1", {
+                    "coordSystem" : coordSystem,
+                    "owner" : owner
+                });
+
+    });
