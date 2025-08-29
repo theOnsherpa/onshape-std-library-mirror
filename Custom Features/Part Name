@@ -1,0 +1,388 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1660;
+import(path : "onshape/std/geometry.fs", version : "1660.0");
+
+icon::import(path : "92e9e8a3d60c644b1a134987", version : "f2a2efcf929ef8524c92d792");
+
+annotation {
+        "Feature Type Name" : "Part Name",
+        "Icon" : icon::BLOB_DATA,
+        "UIHint" : "NO_PREVIEW_PROVIDED",
+        "Editing Logic Function" : "partNameEditingLogic",
+    }
+export const partName = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Part", "Filter" : EntityType.BODY, "MaxNumberOfPicks" : 1 }
+        definition.part is Query;
+
+        annotation { "Name" : "Number of segments", "Default" : "THREE", "UIHint" : "SHOW_LABEL" }
+        definition.segmentCount is SegmentCount;
+
+        if (definition.segmentCount != SegmentCount.ONE)
+        {
+            annotation { "Name" : "Separator", "Default" : "_" }
+            definition.separator is string;
+        }
+
+        annotation { "Group Name" : "Name segments", "Collapsed By Default" : false }
+        {
+            annotation { "Name" : "String/expression", "Default" : true, "UIHint" : "OPPOSITE_DIRECTION" }
+            definition.isString1 is boolean;
+
+            if (definition.isString1)
+            {
+                annotation { "Name" : "1. String" }
+                definition.segment1string is string;
+            }
+            else
+            {
+                annotation { "Name" : "1. Expression" }
+                isAnything(definition.expression1);
+
+                annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                definition.isValueWithUnits1 is boolean;
+
+                annotation { "Name" : "Round expression" }
+                definition.round1 is boolean;
+
+                if (definition.round1)
+                {
+                    if (definition.isValueWithUnits1)
+                    {
+                        annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                        definition.displayUnit1 is DisplayUnit;
+                    }
+
+                    annotation { "Name" : "Decimal places" }
+                    isInteger(definition.decimalPlaces1, DECIMAL_PLACE_BOUNDS);
+                }
+            }
+
+            if (definition.segmentCount != SegmentCount.ONE)
+            {
+                annotation { "Name" : "String/expression", "Default" : true, "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.FIRST_IN_ROW], }
+                definition.isString2 is boolean;
+
+                if (definition.isString2)
+                {
+                    annotation { "Name" : "2. String" }
+                    definition.segment2string is string;
+                }
+                else
+                {
+                    annotation { "Name" : "2. Expression" }
+                    isAnything(definition.expression2);
+
+                    annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                    definition.isValueWithUnits2 is boolean;
+
+                    annotation { "Name" : "Round expression" }
+                    definition.round2 is boolean;
+
+                    if (definition.round2)
+                    {
+                        if (definition.isValueWithUnits2)
+                        {
+                            annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                            definition.displayUnit2 is DisplayUnit;
+                        }
+
+                        annotation { "Name" : "Decimal places" }
+                        isInteger(definition.decimalPlaces2, DECIMAL_PLACE_BOUNDS);
+                    }
+                }
+
+                if (definition.segmentCount != SegmentCount.TWO)
+                {
+                    annotation { "Name" : "String/expression", "Default" : true, "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.FIRST_IN_ROW], }
+                    definition.isString3 is boolean;
+
+                    if (definition.isString3)
+                    {
+                        annotation { "Name" : "3. String" }
+                        definition.segment3string is string;
+                    }
+                    else
+                    {
+                        annotation { "Name" : "3. Expression" }
+                        isAnything(definition.expression3);
+
+                        annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                        definition.isValueWithUnits3 is boolean;
+
+                        annotation { "Name" : "Round expression" }
+                        definition.round3 is boolean;
+
+                        if (definition.round3)
+                        {
+                            if (definition.isValueWithUnits3)
+                            {
+                                annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                                definition.displayUnit3 is DisplayUnit;
+                            }
+
+                            annotation { "Name" : "Decimal places" }
+                            isInteger(definition.decimalPlaces3, DECIMAL_PLACE_BOUNDS);
+                        }
+                    }
+
+                    if (definition.segmentCount != SegmentCount.THREE)
+                    {
+                        annotation { "Name" : "String/expression", "Default" : true, "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.FIRST_IN_ROW], }
+                        definition.isString4 is boolean;
+
+                        if (definition.isString4)
+                        {
+                            annotation { "Name" : "4. String" }
+                            definition.segment4string is string;
+                        }
+                        else
+                        {
+                            annotation { "Name" : "4. Expression" }
+                            isAnything(definition.expression4);
+
+                            annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                            definition.isValueWithUnits4 is boolean;
+
+                            annotation { "Name" : "Round expression" }
+                            definition.round4 is boolean;
+
+                            if (definition.round4)
+                            {
+                                if (definition.isValueWithUnits4)
+                                {
+                                    annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                                    definition.displayUnit4 is DisplayUnit;
+                                }
+
+                                annotation { "Name" : "Decimal places" }
+                                isInteger(definition.decimalPlaces4, DECIMAL_PLACE_BOUNDS);
+                            }
+                        }
+
+                        if (definition.segmentCount != SegmentCount.FOUR)
+                        {
+                            annotation { "Name" : "String/expression", "Default" : true, "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.FIRST_IN_ROW], }
+                            definition.isString5 is boolean;
+
+                            if (definition.isString5)
+                            {
+                                annotation { "Name" : "5. String" }
+                                definition.segment5string is string;
+                            }
+                            else
+                            {
+                                annotation { "Name" : "5. Expression" }
+                                isAnything(definition.expression5);
+
+                                annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                                definition.isValueWithUnits5 is boolean;
+
+                                annotation { "Name" : "Round expression" }
+                                definition.round5 is boolean;
+
+                                if (definition.round5)
+                                {
+                                    if (definition.isValueWithUnits5)
+                                    {
+                                        annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                                        definition.displayUnit5 is DisplayUnit;
+                                    }
+
+                                    annotation { "Name" : "Decimal places" }
+                                    isInteger(definition.decimalPlaces5, DECIMAL_PLACE_BOUNDS);
+                                }
+                            }
+
+                            if (definition.segmentCount != SegmentCount.FIVE)
+                            {
+                                annotation { "Name" : "String/expression", "Default" : true, "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.FIRST_IN_ROW], }
+                                definition.isString6 is boolean;
+
+                                if (definition.isString6)
+                                {
+                                    annotation { "Name" : "6. String" }
+                                    definition.segment6string is string;
+                                }
+                                else
+                                {
+                                    annotation { "Name" : "6. Expression" }
+                                    isAnything(definition.expression6);
+
+                                    annotation { "Name" : "isValueWithUnits", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                                    definition.isValueWithUnits6 is boolean;
+
+                                    annotation { "Name" : "Round expression" }
+                                    definition.round6 is boolean;
+
+                                    if (definition.round6)
+                                    {
+                                        if (definition.isValueWithUnits6)
+                                        {
+                                            annotation { "Name" : "Display unit", "UIHint" : UIHint.SHOW_LABEL, "Description" : displayUnitDescription }
+                                            definition.displayUnit6 is DisplayUnit;
+                                        }
+
+                                        annotation { "Name" : "Decimal places" }
+                                        isInteger(definition.decimalPlaces6, DECIMAL_PLACE_BOUNDS);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        annotation { "Name" : "Set part name", "Default" : true }
+        definition.setPartName is boolean;
+
+        annotation { "Name" : "Set part number", "Default" : false }
+        definition.setPartNumber is boolean;
+
+    }
+    {
+        if (!definition.setPartName && !definition.setPartNumber)
+        {
+            throw regenError("Select 'Set part name' or 'Set part number'.");
+        }
+
+        // nested ternaries that pretty much say: if it's a string, use the string, if it's not, then is it rounded or no?
+        const segment1 = definition.isString1 ? definition.segment1string : (definition.round1 ? roundValueWithUnits(definition.expression1, definition.displayUnit1, definition.decimalPlaces1) : definition.expression1);
+
+        const segment2 = definition.isString2 ? definition.segment2string : (definition.round2 ? roundValueWithUnits(definition.expression2, definition.displayUnit2, definition.decimalPlaces2) : definition.expression2);
+
+        const segment3 = definition.isString3 ? definition.segment3string : (definition.round3 ? roundValueWithUnits(definition.expression3, definition.displayUnit3, definition.decimalPlaces3) : definition.expression3);
+
+        const segment4 = definition.isString4 ? definition.segment4string : (definition.round4 ? roundValueWithUnits(definition.expression4, definition.displayUnit4, definition.decimalPlaces4) : definition.expression4);
+
+        const segment5 = definition.isString5 ? definition.segment5string : (definition.round5 ? roundValueWithUnits(definition.expression5, definition.displayUnit5, definition.decimalPlaces5) : definition.expression5);
+
+        const segment6 = definition.isString6 ? definition.segment6string : (definition.round6 ? roundValueWithUnits(definition.expression6, definition.displayUnit6, definition.decimalPlaces6) : definition.expression6);
+
+        // for loops
+        var segmentArray = [segment1, segment2, segment3, segment4, segment5, segment6];
+        var segmentCount = { "ONE" : 1, "TWO" : 2, "THREE" : 3, "FOUR" : 4, "FIVE" : 5, "SIX" : 6 }[definition.segmentCount as string];
+        var newPartName = toString(segment1);
+
+        for (var i = 1; i <= segmentCount - 1; i += 1)
+            newPartName ~= definition.separator ~ toString(segmentArray[i]);
+
+        if (definition.setPartName)
+        {
+            setProperty(context, {
+                        "entities" : definition.part,
+                        "propertyType" : PropertyType.NAME,
+                        "value" : newPartName
+                    });
+        }
+
+        if (definition.setPartNumber)
+        {
+            setProperty(context, {
+                        "entities" : definition.part,
+                        "propertyType" : PropertyType.PART_NUMBER,
+                        "value" : newPartName
+                    });
+        }
+    });
+
+export function partNameEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+
+    // set the hidden isValueWithUnits boolean to hide/show the units enum.
+    definition.isValueWithUnits1 = definition.expression1 is ValueWithUnits;
+    definition.isValueWithUnits2 = definition.expression2 is ValueWithUnits;
+    definition.isValueWithUnits3 = definition.expression3 is ValueWithUnits;
+    definition.isValueWithUnits4 = definition.expression4 is ValueWithUnits;
+    definition.isValueWithUnits5 = definition.expression5 is ValueWithUnits;
+    definition.isValueWithUnits6 = definition.expression6 is ValueWithUnits;
+
+    return definition;
+}
+
+/**
+ * Acts like roundToPrecision() but if given a valueWithUnits and displayUnit, it will remove the units (by division) and return a rounded number. For example roundValueWithUnits(1.09458737 * inch, inch, 3) = 1.095 and roundValueWithUnits(1*inch, millimeter, 1) = 25.4. If it's a number without units, the result is the same as rountToPrecision, but probably slightly slower.
+ */
+export function roundValueWithUnits(value, displayUnit, precision is number) returns number
+{
+    // if it's a valueWithUnits (like meter or inch), let's keep divide by our display unit. If it's anything else (like 2 or undefined), let's just divide by 1 which has no effect (10/1 = 10)
+    const divisionItem = value is ValueWithUnits ? unitConversion[displayUnit as string] : 1;
+    return roundToPrecision(value / divisionItem, precision);
+}
+
+export enum SegmentCount
+{
+    annotation { "Name" : "One" }
+    ONE,
+    annotation { "Name" : "Two" }
+    TWO,
+    annotation { "Name" : "Three" }
+    THREE,
+    annotation { "Name" : "Four" }
+    FOUR,
+    annotation { "Name" : "Five" }
+    FIVE,
+    annotation { "Name" : "Six" }
+    SIX
+}
+
+export const SegmentIndex =
+{
+        "ONE" : 1,
+        "TWO" : 2,
+        "THREE" : 3,
+        "FOUR" : 4,
+        "FIVE" : 5,
+        "SIX" : 6,
+    };
+
+export enum PartNamePropertyType
+{
+    annotation { "Name" : "Part name" }
+    NAME,
+    annotation { "Name" : "Part number" }
+    NUMBER,
+
+}
+
+
+// may want to detect unit types and limit options only to the right kind, i.e. if it's a length, don't offer degrees.
+// export enum DisplayUnitType
+// {
+//     ANGLE,
+//     LENGTH,
+//     AREA,
+//     VOLUME,
+// }
+
+
+export enum DisplayUnit
+{
+    Millimeter,
+    Centimeter,
+    Meter,
+    Inch,
+    Foot,
+    Yard,
+    Degree,
+    Radian,
+}
+
+export const unitConversion = {
+        "Millimeter" : millimeter,
+        "Centimeter" : centimeter,
+        "Meter" : meter,
+        "Inch" : inch,
+        "Foot" : foot,
+        "Yard" : yard,
+        "Degree" : degree,
+        "Radian" : radian,
+    };
+
+export const DECIMAL_PLACE_BOUNDS = { (unitless) : [-1e6, 3, 1e6] } as IntegerBoundSpec;
+
+export const displayUnitDescription = "Determines what number comes out of the expression if it has units (length or angle). For example, if your expression evaluates to '1*inch', then selecting 'Inch' here results in '1', but selecting 'Millimeter' results in '25.4'";
