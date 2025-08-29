@@ -1,0 +1,150 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1337;
+import(path : "onshape/std/geometry.fs", version : "1337.0");
+
+export function lerp(norm, min, max)
+{
+    return ((max - min) * norm + min);
+}
+
+/**
+ * Places a number from a given range onto a 0to1 range
+ */
+export function normalizeValue(value, min, max)
+{
+    return ((value - min) / (max - min));
+}
+
+/**
+ * Takes a value from a range and returns the corresponding value from another range. For example if value=5 and the min/max is 0-10 with a target range of 0-2 it will return 1 (halfway between each range).
+ */
+export function remap(value, min, max, targetMin, targetMax)
+{
+    return (value - min) * (targetMax - targetMin) / (max - min) + targetMin;
+}
+
+// calculates rotation for the base grid (from Maximilian Schommer' Surface pattern feature)
+export function gen2dRotMat(angle)
+{
+    var rotMatrix is Matrix = zeroMatrix(2, 2);
+    rotMatrix[0][0] = cos(angle);
+    rotMatrix[0][1] = -1 * sin(angle);
+    rotMatrix[1][0] = sin(angle);
+    rotMatrix[1][1] = cos(angle);
+
+    return rotMatrix;
+}
+
+// Transform by mate connector (from Maximilian Schommer's Surface Pattern feature)
+export function transformByMateConnector(context is Context, id is Id, c1, c2)
+{
+    var xAxis = c2.xAxis;
+    var zAxis = c2.zAxis;
+
+    const A = toWorld(c1);
+    const B = toWorld(coordSystem(c2.origin, xAxis, zAxis));
+    var transformMatrix = (B * inverse(A));
+    return transformMatrix;
+}
+
+// Pseudo-random number generator (thanks to Ilya Baran)
+export function lcprng(seed is number) returns function
+{
+    const a = 1103515245;
+    const c = 12345;
+    const m = 2^31;
+    var state = new box(seed);
+    return function() {
+        state[] = (a * state[] + c) % m;
+        return state[];
+    };
+}
+
+// for converting hexadecimal values to Onshape's 0to1 color value range
+export  const hexMap = {"0": 0,"1":1,"2":2,"3":3,"4":4 ,"5":5,"6":6,"7":7,"8":8,"9":9,"a":10,"b":11,"c":12, "d":13,"e":14,"f":15, "A":10, "B":11,"C":12,"D":13,"E":14,"F":15};
+export function hexCode(hexCode)
+{    
+        var splitString = splitIntoCharacters(hexCode);
+        var val1 = splitString[0];
+        var hex1 = hexMap[splitString[0]];
+        var hex2 = hexMap[splitString[1]];
+        var hex3 = hexMap[splitString[2]];
+        var hex4 = hexMap[splitString[3]];
+        var hex5 = hexMap[splitString[4]];
+        var hex6 = hexMap[splitString[5]];
+        var RGB = {"r" : (1/256*(hex1*16+hex2)), "g" : (1/256*(hex3*16+hex4)), "b" : (1/256*(hex5*16+hex6))};
+        return RGB;
+}
+export const HUE_BOUNDS = { (unitless) : [0, 0, 360] } as IntegerBoundSpec;
+export const SATURATION_VALUE_BOUNDS = { (unitless) : [0, 0.75, 1] } as RealBoundSpec;
+
+export function colorHsl(hue is number, saturation is number, value is number)
+precondition
+{
+    isInteger(hue, HUE_BOUNDS);
+    isReal(saturation, SATURATION_VALUE_BOUNDS);
+    isReal(value, SATURATION_VALUE_BOUNDS);
+}
+{
+    // Algorithm from https://cs.stackexchange.com/questions/64549/convert-hsv-to-rgb-colors
+    var h is number = hue / 60;
+    if (hue >= 300)
+        h = (hue - 300) / 60;
+
+    const max is number = value;
+    const chroma is number = saturation * value;
+    const min is number = max - chroma;
+
+    var red;
+    var green;
+    var blue;
+
+    if (h < 0)
+    {
+        red = max;
+        green = min;
+        blue = min - h * chroma;
+    }
+    else if (h < 1)
+    {
+        red = max;
+        green = min + h * chroma;
+        blue = min;
+    }
+    else if (h < 2)
+    {
+        red = min - (h - 2) * chroma;
+        green = max;
+        blue = min;
+    }
+    else if (h < 3)
+    {
+        red = min;
+        green = max;
+        blue = min + (h - 2) * chroma;
+    }
+    else if (h < 4)
+    {
+        red = min;
+        green = min - (h - 4) * chroma;
+        blue = max;
+    }
+    else if (h < 5)
+    {
+        red = min + (h - 4) * chroma;
+        green = min;
+        blue = max;
+    }
+    var RGB = {"r" : red, "g" : green, "b" : blue};
+
+    return RGB;
+}
+
+export function sine(value, frequency, amplitude, phase)
+{
+    var sineVal = amplitude*sin(value-frequency+phase);
+    return sineVal;
+}
+
