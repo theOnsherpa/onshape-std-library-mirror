@@ -1,0 +1,73 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1576;
+import(path : "onshape/std/geometry.fs", version : "1576.0");
+export import(path : "onshape/std/boolean.fs", version : "1576.0");
+export import(path : "b82bd38a9390b4dd3155b161", version : "25f259d811ce5137fa6d74ba");
+icon::import(path : "ed562bf97e15b358738c8b36", version : "f0541f5f0052d61db3a26e17");
+
+
+annotation { "Feature Type Name" : "Cube",
+        "Editing Logic Function" : "sixDirectionalPrimitiveEditingLogic",
+        "Manipulator Change Function" : "manipulatorChange",
+        "Icon" : icon::BLOB_DATA }
+
+export const cuboid = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        sixSidedPredicate(definition);
+    }
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        // making the manipulators
+        createSixSidedManips(definition, context, id);
+
+
+        //show a coordinate system if needed
+        if (!definition.uniform && definition.showCoord)
+        {
+            displayCsys(context, definition);
+        }
+
+        var value = sixSidedSizes(definition);
+
+        // if empty query make the  on the origin. try silent is used because the query for the studio origin fails when feature patterning this feature.
+        try silent
+        {
+            if (isOriginSelected(context, definition.locations))
+            {
+                definition.locations = definition.locations->qSubtraction(qCreatedBy(makeId("Origin")));
+                fCuboid(context, id + "cuboid", {
+                            "corner1" : vector(value.Xneg, value.Yneg, value.Zneg),
+                            "corner2" : vector(value.Xpos, value.Ypos, value.Zpos)
+                        });
+            }
+        }
+
+        forEachEntity(context, id + "operation", definition.locations, function(vertex is Query, id is Id)
+            {
+                fCuboid(context, id + "cuboid", {
+                            "corner1" : vector(value.Xneg, value.Yneg, value.Zneg),
+                            "corner2" : vector(value.Xpos, value.Ypos, value.Zpos)
+                        });
+
+                var transforms = getTransform(context, vertex);
+
+                var body = qCreatedBy(id + "cuboid", EntityType.BODY);
+
+                opTransform(context, id + "transform", {
+                            "bodies" : body,
+                            "transform" : transforms
+                        });
+            });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+    });
