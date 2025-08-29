@@ -1,0 +1,344 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1403;
+import(path : "onshape/std/geometry.fs", version : "1403.0");
+
+icon::import(path : "424c054bc7e85a3f4d103ef5", version : "e11ed1e12b922cff9b8cccb8");
+
+export import(path : "3c87f2998d2c6f433df94bd1", version : "b39d0e92f1342f823e42324b");
+
+export enum fluteShapeType
+{
+    Curved,
+    Straight
+}
+
+export enum fluteCreationType
+{
+    Standard,
+    Custom
+}
+
+export enum diameterType
+{
+    annotation { "Name" : "By ratio" }
+    byRatio,
+    annotation { "Name" : "Equal" }
+    Standard
+}
+
+annotation { "Feature Type Name" : "Pan Pipe", "Icon" : icon::BLOB_DATA }
+export const panFlute = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "creation type", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.creationType is fluteCreationType;
+
+        annotation { "Group Name" : "Music stuff", "Collapsed By Default" : false }
+        {
+
+            if (definition.creationType == fluteCreationType.Custom)
+            {
+                annotation { "Name" : "Notes", "Item name" : "Note", "Item label template" : "#note" }
+                definition.customNotes is array;
+                for (var note in definition.customNotes)
+                {
+                    annotation { "Name" : "Root note" }
+                    note.customRootNote is rootNote;
+
+                    annotation { "Name" : "Octave", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isInteger(note.customOctave, { (unitless) : [0, 4, 8] } as IntegerBoundSpec);
+                }
+            }
+            if (definition.creationType == fluteCreationType.Standard)
+            {
+                annotation { "Name" : "Root note" }
+                definition.rootNote is rootNote;
+
+                annotation { "Name" : "Scale" }
+                definition.scale is scaleType;
+
+                annotation { "Name" : "Octave" }
+                isInteger(definition.octave, { (unitless) : [0, 4, 8] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Number of notes", }
+                isInteger(definition.noteCount, { (unitless) : [1, 17, 100000] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Move root note",
+                            "Description" : "Shifts the position of the root note in the scale. For example, a value of 4 on a C5 major scale makes C5 the fourth note on the instrument, making B4, A4, and G4 available below it." }
+                isInteger(definition.rootPosition, { (unitless) : [-24, 0, 24] } as IntegerBoundSpec);
+            }
+        }
+        annotation { "Group Name" : "Shape stuff", "Collapsed By Default" : false }
+        {
+            annotation { "Name" : "Diameter sizing", "UIHint" : UIHint.SHOW_LABEL }
+            definition.diameterType is diameterType;
+
+            if (definition.diameterType == diameterType.Standard)
+            {
+                annotation { "Name" : "Tube diameter",
+                            "Description" : "Larger diameters are louder, and less prone to hitting shrill harmonics, but require more forceful blowing. It is recommended to use the By ratio setting." }
+                isLength(definition.tubeDia, { (millimeter) : [0, 11, 100000] } as LengthBoundSpec);
+            }
+
+            if (definition.diameterType == diameterType.byRatio)
+            {
+                annotation { "Name" : "Minimum diameter",
+                            "Description" : "Prevents high notes from being too small to play" }
+                isLength(definition.minDiameter, { (millimeter) : [0, 9, 100000] } as LengthBoundSpec);
+            }
+
+            annotation { "Name" : "Wall thickness" }
+            isLength(definition.wallThickness, { (millimeter) : [0, 2, 100000] } as LengthBoundSpec);
+
+            annotation { "Name" : "Shape",
+                        "Description" : "Curved shapes are often easier to play by turning your head to reach notes more quickly. Straight pipes fit more easily into a book bag or shipping box." }
+            definition.shape is fluteShapeType;
+
+            if (definition.shape == fluteShapeType.Curved)
+            {
+                annotation { "Name" : "Curve radius" }
+                isLength(definition.curveRadius, { (millimeter) : [0, 300, 100000] } as LengthBoundSpec);
+            }
+        }
+        annotation { "Group Name" : "Advanced stuff", "Collapsed By Default" : true }
+        {
+            annotation { "Name" : "Speed of sound (m/s)",
+                        "Description" : "This impacts pitch and can be used to adjust for different tempuratures, humidities, or even extraterrestrial atmospheres. It can also be used to fine-tune the pitch of the pipe. Higher numbers lower the pitch." }
+            isReal(definition.speedOfSound, { (unitless) : [0, 344, 100000] } as RealBoundSpec);
+        }
+        annotation { "Name" : "Merge pipes", "Default" : true }
+        definition.merge is boolean;
+
+    }
+    {
+        const wallThickness = definition.wallThickness;
+        const speedOfSound = definition.speedOfSound; /* meters per second */
+        var scaleNotes;
+
+        //----------------------------------------------------
+        //          NOTE LISTS FOR STANDARD SCALES
+        //----------------------------------------------------
+        if (definition.creationType == fluteCreationType.Standard)
+        {
+            const rootNoteOffset = rootNoteOffsetList[toString(definition.rootNote)]; /*offsets the selected scale (i.e. major) by the root note selection (i.e. F)*/
+            const selectedScale = scale[toString(definition.scale)];
+            var rootPitchIndex = rootNoteOffset + definition.octave * 12; /*finds the pitch from which to start a pattern by first offsetting from the bottom of the pitch list to the note, then moving up in octaves to reach final pitch*/
+            var startIndex;
+            var noteList = [];
+            // loop i loops through octaves of the j loop
+            for (var i = 0; (i * 12 + rootNoteOffset) < size(pitch); i += 1)
+            {
+                // loop j loops through the scale in one octave
+                for (var j = 0; j < size(selectedScale); j += 1)
+                {
+                    if (selectedScale[j] + 12 * i + rootNoteOffset >= size(pitch))
+                    {
+                        continue;
+                    }
+                    var loopPitch = pitch[selectedScale[j] + 12 * i + rootNoteOffset];
+                    noteList = append(noteList, loopPitch);
+
+                    if (pitch[rootPitchIndex] == loopPitch)
+                    {
+                        startIndex = size(noteList) - 1 - definition.rootPosition;
+                    }
+                }
+            }
+
+            var highNoteIndex = startIndex + definition.noteCount;
+
+            // report warnings if notes go out of range, otherwise, finish the feature
+            var tooHigh = highNoteIndex >= size(noteList);
+            var tooLow = startIndex < 0;
+            if (tooHigh)
+            {
+                reportFeatureWarning(context, id, "The high note is too high.");
+            }
+            if (tooLow)
+            {
+                reportFeatureWarning(context, id, "The low note is too low.");
+            }
+            if (!tooHigh && !tooLow)
+            {
+
+                // cut out just the section of the scale with the selected notes
+                scaleNotes = subArray(noteList, startIndex, highNoteIndex);
+            }
+        }
+
+        //----------------------------------------------------
+        //          NOTE LISTS FOR CUSTOM SCALES
+        //----------------------------------------------------
+
+        if (definition.creationType == fluteCreationType.Custom)
+        {
+            scaleNotes = [];
+            const customNotes = definition.customNotes;
+            for (var i = 0; i < size(customNotes); i += 1)
+            {
+                var noteArray = customNotes[i];
+                var customRootNote = rootNoteOffsetList[toString(noteArray.customRootNote)]; /*offsets the selected scale (i.e. major) by the root note selection (i.e. F)*/
+                var customOctave = noteArray.customOctave;
+                var customNote = pitch[customRootNote + customOctave * 12];
+                scaleNotes = append(scaleNotes, customNote);
+            }
+        }
+
+        //----------------------------------------------------
+        //                CALCULATE DIMENSIONS
+        //----------------------------------------------------
+
+        var lengthList = [];
+        var tubeDiaList = [];
+        var tuningMultiple = 0.959; // Used to tune the pitch emperically via 3D printing iteration
+        // temporarily set a variable for marking the tube for printing
+        setVariable(context, "tuningMultiple", "#tuningMultiple = " ~ toString(tuningMultiple));
+
+        // find lengths and diameters based on the frequency of each note
+        for (var note in scaleNotes)
+        {
+            var length = (1 / 4) * (speedOfSound / note) * tuningMultiple * meter;
+            lengthList = append(lengthList, length);
+            if (definition.diameterType == diameterType.byRatio)
+            {
+                var newDiameter = max(sqrt(length * millimeter), definition.minDiameter);
+                tubeDiaList = append(tubeDiaList, newDiameter);
+            }
+            else
+            {
+                tubeDiaList = append(tubeDiaList, definition.tubeDia);
+            }
+        }
+
+        //----------------------------------------------------
+        //                  CREATE TRANSFORMS
+        //----------------------------------------------------
+
+        var transforms = [];
+        var instanceNames = [];
+
+        // transforms for straight flute
+        if (definition.shape == fluteShapeType.Straight)
+        {
+
+            var distance = 0 * millimeter;
+
+            for (var i = 0; i < size(scaleNotes); i += 1)
+            {
+                if (i != 0)
+                {
+                    distance = distance + tubeDiaList[i - 1] / 2 + tubeDiaList[i] / 2 + wallThickness + .2 * millimeter;
+                }
+                var transform = transform(vector(distance, 0 * meter, 0 * meter));
+                transforms = append(transforms, transform);
+                instanceNames = append(instanceNames, toString(i));
+            }
+        }
+
+        // transforms for curved flute
+        if (definition.shape == fluteShapeType.Curved)
+        {
+            var angle = 0 * degree;
+            var arcCenter = vector(0 * meter, -definition.curveRadius, 0 * meter);
+            var arcLine = line(arcCenter, Z_DIRECTION);
+            for (var i = 0; i < size(scaleNotes); i += 1)
+            {
+                if (i != 0)
+                {
+                    angle = angle - (2 * atan(((tubeDiaList[i - 1] / 2 + tubeDiaList[i] / 2 + wallThickness + .2 * millimeter) / 2) / definition.curveRadius));
+                }
+                var transform = rotationAround(arcLine, angle);
+                transforms = append(transforms, transform);
+                instanceNames = append(instanceNames, toString(i));
+            }
+        }
+
+        //----------------------------------------------------
+        //                  CREATE GEOMETRY
+        //----------------------------------------------------
+
+        // create a sketch and circles
+        var IDsketch = newSketch(context, id + "IDsketch", {
+                "sketchPlane" : qCreatedBy(makeId("Top"), EntityType.FACE)
+            });
+        for (var i = 0; i < size(scaleNotes); i += 1)
+        {
+            var center = worldToPlane(plane(WORLD_COORD_SYSTEM), transforms[i].translation);
+
+
+            skCircle(IDsketch, "circle1" ~ i, {
+                        "center" : center,
+                        "radius" : tubeDiaList[i] / 2
+                    });
+        }
+        skSolve(IDsketch);
+
+        // extrude tube inner diameters
+        var IDbodies = qNothing();
+        for (var i = 0; i < size(scaleNotes); i += 1)
+        {
+            opExtrude(context, id + "IDextrude" + i, {
+                        "entities" : evaluateQuery(context, qCreatedBy(id + "IDsketch", EntityType.FACE))[i],
+                        "direction" : -Z_DIRECTION,
+                        "endBound" : BoundingType.BLIND,
+                        "endDepth" : lengthList[i] + wallThickness
+                    });
+            var body = qCreatedBy(id + "IDextrude" + i, EntityType.BODY);
+            IDbodies = qUnion([IDbodies, body]);
+        }
+
+        var IDfaces = evaluateQuery(context, qCreatedBy(id + "IDpattern", EntityType.FACE));
+
+        // shell pipes
+        for (var i = 0; i < size(scaleNotes); i += 1)
+        {
+            opShell(context, id + "IDshell" + i, {
+                        "entities" : qCapEntity(id + "IDextrude" + i, CapType.START, EntityType.FACE),
+                        "thickness" : wallThickness
+                    });
+        }
+
+        // merge pipes together
+        if (definition.merge && size(scaleNotes) > 1)
+        {
+            opBoolean(context, id + "IDboolean", {
+                        "tools" : IDbodies,
+                        "operationType" : BooleanOperationType.UNION
+                    });
+        }
+
+        //----------------------------------------------------
+        //              ORGANIZE AND CLEAN UP
+        //----------------------------------------------------
+
+        // name part
+        const octave = definition.octave;
+        var name;
+        if (definition.creationType == fluteCreationType.Standard)
+        {
+            name = toString(definition.rootNote) ~ toString(definition.octave) ~ " " ~ toString(definition.scale) ~ " " ~ toString(definition.noteCount) ~ "-note Pan Pipe";
+        }
+        if (definition.creationType == fluteCreationType.Custom)
+        {
+            name = "Custom " ~ toString(size(scaleNotes)) ~ "-note Pan Pipe";
+        }
+        setProperty(context, {
+                    "entities" : IDbodies,
+                    "propertyType" : PropertyType.NAME,
+                    "value" : name
+                });
+
+        //color part
+        setProperty(context, {
+                    "entities" : IDbodies,
+                    "propertyType" : PropertyType.APPEARANCE,
+                    "value" : color(0.796875, 0.765625, 0.7109375)
+                });
+
+        // cleanup sketch geometry
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : qUnion([qCreatedBy(id + "IDsketch", EntityType.BODY), qUnion(IDfaces)])
+                });
+    });
