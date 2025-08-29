@@ -1,6 +1,3 @@
-
-// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
-
 FeatureScript 1204;
 import(path : "onshape/std/geometry.fs", version : "1204.0");
 icon::import(path : "6937aa461119700a3a978600/1c0bdf09cb3203fed18172e2/227d23871394a7168625bac3", version : "f978e36ed28c0e54a762c892");
@@ -8,9 +5,8 @@ icon::import(path : "6937aa461119700a3a978600/1c0bdf09cb3203fed18172e2/227d23871
 
 
 // This script was written by Evan Reese with lots of help from the great people on the Onshape forum.
-// Evan is a co-owner and industrial designer at Fractal (fractalhardware.com)
 // Feel free to use this for whatever you want and
-// If you do something particularly awesome with this script I'd love to see it! Message me through Onshape or at evan@fractalhardware.com
+// If you do something particularly awesome with this script I'd love to see it! Message me through the Onshape forum @EvanReese
 
 annotation { "Feature Type Name" : "Wireframe", "Icon" : icon::BLOB_DATA }
 export const wires = defineFeature(function(context is Context, id is Id, definition is map)
