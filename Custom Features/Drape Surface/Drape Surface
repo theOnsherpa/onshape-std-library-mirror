@@ -1,0 +1,798 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "onshape/std/projectiontype.gen.fs", version : "2581.0");
+import(path : "9f4c9835d8018ff7dbdb5683/77c856824c783f8f1c5a3312/c60f4a6e12f07acee647a2a1", version : "e532e824c39a1c21153d1e57");
+import(path : "53ca0ca4ee0dce4a4c544698/81588f164fb853baac61dcf3/1c2a39dd84ee4ad42e793007", version : "420e90f9cc554c0b236e9e09");
+import(path : "9f4c9835d8018ff7dbdb5683/3f5ac416beffe048c002d4d6/7693e3e7037d37a1b5de5daa", version : "dbceb2775006ea59367cca37");
+export import(path : "12312312345abcabcabcdeff/61dadd8dba1440aeb458f257/0e71899789a4f9231b17a016", version : "f3d5288536af13b5f8613670");
+import(path : "58ee565b9814988ff13504d8", version : "9aa6b9c06d64149c151dac58");
+descriptionImage::import(path : "dbcffdf9d2f7edcc1731ac5c", version : "508e292179b5a219fe915a28");
+
+drapeSurfaceIcon::import(path : "6f3a1568a8e7e95b29efa6f8", version : "d7e158de06664e43a2ca4a16");
+
+annotation { "Feature Type Name" : "Drape surface",
+"Feature Type Description" : "Creates a sticker-like surface on a body, by draping a tool surface onto a target body.",
+"Description Image" : descriptionImage::BLOB_DATA,
+"Icon" : drapeSurfaceIcon::BLOB_DATA }
+export const drapeSurface = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Tool (surface to drape)", "Filter" : EntityType.FACE && ConstructionObject.NO, "MaxNumberOfPicks" : 1 }
+        definition.tool is Query;
+
+        annotation { "Name" : "Flip direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+        definition.flipDirection is boolean;
+
+        annotation { "Name" : "Targets", "Filter" : EntityType.FACE || (EntityType.BODY && (BodyType.SOLID || BodyType.SHEET) && SketchObject.NO) && AllowMeshGeometry.YES }
+        definition.target is Query;
+
+        annotation { "Group Name" : "Surface projection", "Collapsed By Default" : false }
+        {
+            annotation { "Name" : "Projection type" }
+            definition.drapeProjectionType is DrapeProjectionType;
+
+            if (definition.drapeProjectionType == DrapeProjectionType.DIRECTION)
+            {
+                annotation { "Name" : "Direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                definition.direction is Query;
+
+                annotation { "Name" : "Flip direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.flipProjectionDirection is boolean;
+            }
+
+
+
+            annotation { "Name" : "U Count" }
+            isInteger(definition.uCount, UV_BOUNDS);
+
+            annotation { "Name" : "V Count" }
+            isInteger(definition.vCount, UV_BOUNDS);
+
+            annotation { "Name" : "Preview projection", "Default" : false, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            definition.previewProjection is boolean;
+
+            annotation { "Name" : "Preview grid", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            definition.previewGrid is boolean;
+        }
+
+        annotation { "Group Name" : "Surface creation", "Collapsed By Default" : false }
+        {
+
+
+            annotation { "Name" : "Surface creation method" }
+            definition.drapeType is DrapeType;
+
+            if (definition.drapeType == DrapeType.B_SPLINE_SURFACE)
+            {
+                annotation { "Name" : "Degree" }
+                isInteger(definition.bSplineSurfaceDegree, DEGREE_BOUND);
+            }
+            else if (definition.drapeType == DrapeType.CONSTRAINED_SURFACE)
+            {
+                annotation { "Name" : "Tolerance" }
+                isLength(definition.constrainedSurfaceTolerance, TOLERANCE_BOUND);
+
+                annotation { "Name" : "Optimize", "UIHint" : UIHint.SHOW_LABEL }
+                definition.constrainedSurfaceSmooth is OptimizationMethod;
+            }
+            else if (definition.drapeType == DrapeType.LOFT)
+            {
+                annotation { "Name" : "Flip curve direction" }
+                definition.flipCurveDirection is boolean;
+
+                // annotation { "Name" : "Add guide curves" }
+                // definition.addLoftGuides is boolean;
+            }
+        }
+
+        annotation { "Name" : "Keep inputs" }
+        definition.keepInputs is boolean;
+
+    }
+    {
+        if (definition.previewProjection || definition.previewGrid)
+        {
+            reportFeatureWarning(context, id, "Previews slow down this feature. Turn them off when finished using them.");
+        }
+
+        definition.flipCurveDirection = definition.flipCurveDirection && definition.drapeType == DrapeType.LOFT; // Since re-thinking the purpose of flip UV to just apply to loft curve directions, this makes it only apply to loft no bSpline etc. Not my favorite solution, but gets it done for now. TODO refactor later.
+
+        var toKeep = [];
+        definition.projectionLineColor = DebugColor.CYAN;
+        definition.pointGrid = createPointsOnTarget(context, id, definition); // doing this here so I don't have to recalculate points in downstream functions
+
+        var surfaceOutput = createDrapedSurface(context, id, definition);
+
+        toKeep = append(toKeep, surfaceOutput);
+
+        // toKeep = append(toKeep, qCreatedBy(id + "loftCurves", EntityType.BODY)); //TEMP
+
+        var toDelete = qCreatedBy(id, EntityType.BODY)->qSubtraction(qUnion(toKeep));
+
+        if (!definition.keepInputs && !isQueryEmpty(context, definition.tool->qSketchFilter(SketchObject.NO)))
+        {
+            toDelete = qUnion([toDelete, definition.tool->qOwnerBody()]);
+        }
+
+        if (!isQueryEmpty(context, toDelete))
+        {
+            opDeleteBodies(context, id + "deleteBodies", {
+                        "entities" : toDelete
+                    });
+        }
+
+    });
+
+/**
+ * Creates a draped surface according to the feature settings, then stabilized the Ids of the output.
+ */
+function createDrapedSurface(context is Context, id is Id, definition is map) returns Query
+{
+    var surfaceOutput;
+
+    if (definition.drapeType == DrapeType.LOFT)
+    {
+        surfaceOutput = createLoftOnTarget(context, id, definition);
+    }
+    else if (definition.drapeType == DrapeType.FILL)
+    {
+        surfaceOutput = createFillOnTarget(context, id, definition);
+    }
+    else if (definition.drapeType == DrapeType.CONSTRAINED_SURFACE)
+    {
+        surfaceOutput = createConstrainedSurfaceOnTarget(context, id, definition);
+    }
+    else if (definition.drapeType == DrapeType.B_SPLINE_SURFACE)
+    {
+        surfaceOutput = createBSplineSurfaceOnTarget(context, id, definition);
+    }
+
+    createStableOutputIDs(context, id, surfaceOutput);
+
+    return surfaceOutput;
+}
+
+
+/**
+ * Sets Ids for all parts of the output surface (face, points, edges and body)
+ */
+function createStableOutputIDs(context is Context, id is Id, surface is Query)
+{
+    opNameEntity(context, id + "body", { "entity" : surface, "entityName" : toIdentity(id + "body") });
+    opNameEntity(context, id + "face", { "entity" : qOwnedByBody(surface, EntityType.FACE), "entityName" : toIdentity(id + "face") });
+
+    const surfaceEdges = evaluateQuery(context, qOwnedByBody(surface, EntityType.EDGE));
+    for (var i, edge in surfaceEdges)
+        opNameEntity(context, id + "edge" + i, { "entity" : edge, "entityName" : toIdentity(id + "edge" + i) });
+
+
+    const surfacePoints = evaluateQuery(context, qOwnedByBody(surface, EntityType.VERTEX));
+    for (var i, point in surfacePoints)
+        opNameEntity(context, id + "point" + i, { "entity" : point, "entityName" : toIdentity(id + "point" + i) });
+}
+
+
+/**
+ * From a point grid, create curves representing the outer boundary. Used for splitting constrained surface or creating a fill surface.
+ */
+function getPointGridBoundaryEdges(context is Context, id is Id, definition is map) returns Query
+{
+    const pointGrid = definition.pointGrid;
+
+    const uFirstRow = pointGrid[0];
+    const uLastRow = pointGrid[size(pointGrid) - 1];
+    const transposedArray = transposeNestedArray(pointGrid);
+    const vFirstRow = transposedArray[0];
+    const vLastRow = transposedArray[size(transposedArray) - 1];
+
+    opFitSpline(context, id + "boundaryEdge" + "uFirstEdge", { "points" : uFirstRow });
+    opFitSpline(context, id + "boundaryEdge" + "uLastEdge", { "points" : uLastRow });
+    opFitSpline(context, id + "boundaryEdge" + "vFirstEdge", { "points" : vFirstRow });
+    opFitSpline(context, id + "boundaryEdge" + "vLastEdge", { "points" : vLastRow });
+
+    return qCreatedBy(id + "boundaryEdge");
+
+}
+
+
+
+function errorIfPeriodic(periodicity is map)
+{
+    if (periodicity.UIsPeriodic || periodicity.VIsPeriodic)
+    {
+        throw regenError("Fill and Constrained Surface modes cannot use a closed surface tool.", ["drapeType", "tool"]);
+    }
+}
+
+
+/**
+ * Create a fill surface on an array of projected points by creating boundary edges from borders and using the points as guides. Returns a query for the resulting surface.
+ */
+
+function createFillOnTarget(context is Context, id is Id, definition is map) returns Query
+{
+    const periodicity = evInputPeriodicity(context, definition);
+    
+    errorIfPeriodic(periodicity);
+    
+    const boundaryEdges = createGridBoundaryCurves(context, id, definition);
+    
+    const guideVertices = createFillGuideVertices(context, id, definition);
+    
+    // TODO fix Fill
+    
+    opFillSurface(context, id + "surfaceOutput" + "fill", {
+            "edgesG0" : boundaryEdges,
+            "guideVertices" : guideVertices
+    });
+    
+    return qCreatedBy(id + "surfaceOutput", EntityType.BODY);
+
+}
+
+function createGridBoundaryCurves(context is Context, id is Id, definition is map) returns Query
+{
+    const pointGrid = definition.pointGrid;
+    const transposedPointGrid = transposeNestedArray(definition.pointGrid);
+    const pointsForBoundaries = [
+            pointGrid[0],
+            last(pointGrid),
+            transposedPointGrid[0],
+            last(transposedPointGrid)
+        ];
+        
+    for (var i, edgePoints in pointsForBoundaries)
+    {
+        opFitSpline(context, id + "gridBoundary" + i, {"points" : edgePoints});
+    }
+    
+    const boundaryCurves = qCreatedBy(id + "gridBoundary", EntityType.EDGE);
+    
+    if (definition.previewGrid)
+    {
+        addDebugEntities(context, boundaryCurves, DebugColor.MAGENTA);
+    }
+    
+    return boundaryCurves;
+}
+
+function createFillGuideVertices(context is Context, id is Id, definition is map) returns Query
+{
+        var guideVertices = definition.pointGrid;
+    guideVertices = removeLastArrayElement(guideVertices);
+    guideVertices = removeElementAt(guideVertices, 0);
+    guideVertices = transposeNestedArray(guideVertices);
+    guideVertices = removeLastArrayElement(guideVertices);
+    guideVertices = removeElementAt(guideVertices, 0);
+    
+    for (var i, row in guideVertices)
+    {
+        for (var j, point in row)
+        {
+            opPoint(context, id + "guideVertex" + "row" + i + "column" + j, {"point" : point});
+        }
+    }
+    
+    return qCreatedBy(id + "guideVertex", EntityType.VERTEX);
+}
+
+
+
+
+/**
+ * Create constrained surface on an array of projected points. Returns a query for the resulting surface.
+ */
+function createConstrainedSurfaceOnTarget(context is Context, id is Id, definition is map) returns Query
+{
+    const periodicity = evInputPeriodicity(context, definition);
+    errorIfPeriodic(periodicity);
+
+    const smooth = switch (definition.constrainedSurfaceSmooth) { OptimizationMethod.PERF : false, OptimizationMethod.SMOOTH : true };
+    var points = [];
+    const pointGrid = definition.pointGrid->concatenateArrays();
+    for (var point in pointGrid)
+    {
+        points = append(points, { "point" : point });
+    }
+
+    opConstrainedSurface(context, id + "surfaceOutput" + unstableIdComponent("constrainedSurface"), {
+                "points" : points,
+                "tolerance" : definition.constrainedSurfaceTolerance,
+                "smooth" : smooth
+            });
+
+    const constrainedSurfaceFace = qCreatedBy(id + "surfaceOutput", EntityType.FACE);
+
+    const midPoint = evFaceTangentPlane(context, { "face" : constrainedSurfaceFace, "parameter" : vector(0.5, 0.5) }).origin;
+
+    const gridBoundaryEdges = getPointGridBoundaryEdges(context, id + "splitEdges", definition)->qEntityFilter(EntityType.EDGE);
+
+    opSplitFace(context, id + "splitFace", {
+                "faceTargets" : constrainedSurfaceFace,
+                "edgeTools" : gridBoundaryEdges,
+                "projectionType" : ProjectionType.NORMAL_TO_TARGET
+            });
+    const faceToKeep = constrainedSurfaceFace->qContainsPoint(midPoint);
+
+
+    const facesToDelete = constrainedSurfaceFace->qSubtraction(faceToKeep);
+
+    opDeleteBodies(context, id + "deleteSplittingEdges", { "entities" : gridBoundaryEdges }); // delete the boundary curves
+    opDeleteFace(context, id + "deleteSplitFaces", {
+                "deleteFaces" : facesToDelete,
+                "includeFillet" : false,
+                "capVoid" : false,
+                "leaveOpen" : true
+            });
+
+
+    return qOwnerBody(constrainedSurfaceFace);
+}
+
+/**
+ * Check whether the bSpline degree is too high for the uCount or vCount, and throws an error if so.
+ */
+function checkDegreeAndPointCount(definition is map)
+{
+    const degreeCountErrorMessage = "Degree must not exceed the point count -1.";
+
+    if (definition.uCount - 1 < definition.bSplineSurfaceDegree)
+    {
+        throw regenError(degreeCountErrorMessage, ["bSplineSurfaceDegree", "uCount"]);
+    }
+
+    if (definition.vCount - 1 < definition.bSplineSurfaceDegree)
+    {
+        throw regenError(degreeCountErrorMessage, ["bSplineSurfaceDegree", "vCount"]);
+    }
+}
+
+/**
+ * Create b-spline surface on an array of projected points. Returns a query for the resulting surface.
+ */
+function createBSplineSurfaceOnTarget(context is Context, id is Id, definition is map) returns Query
+{
+    checkDegreeAndPointCount(definition);
+
+    const periodicity = evInputPeriodicity(context, definition);
+
+    var bSplineMatrix = adjustBSplineSurfaceMatrixForPeriodicity(definition.pointGrid as ControlPointMatrix, periodicity.UIsPeriodic, periodicity.VIsPeriodic); //->controlPointMatrix();
+
+
+    const bSplineDefinition = bSplineSurface({
+                "uDegree" : definition.bSplineSurfaceDegree,
+                "vDegree" : definition.bSplineSurfaceDegree,
+                "isUPeriodic" : periodicity.UIsPeriodic,
+                "isVPeriodic" : periodicity.VIsPeriodic,
+                "controlPoints" : bSplineMatrix
+            });
+
+    opCreateBSplineSurface(context, id + "surfaceOutput", {
+                "bSplineSurface" : bSplineDefinition
+            });
+
+    return qCreatedBy(id + "surfaceOutput", EntityType.BODY);
+}
+
+/**
+ * Create section curves on the target and loft through them. Returns a query for the resulting surface.
+ */
+function createLoftOnTarget(context is Context, id is Id, definition is map) returns Query
+{
+    const periodicity = evInputPeriodicity(context, definition);
+
+    var roughCurves = evaluateQuery(context, createSplinesThroughPoints(context, id + "loftCurves" + "sections", definition));
+
+    if (periodicity.loftIsPeriodic)
+    {
+        roughCurves = removeLastArrayElement(roughCurves); // knock off the last curve since it matches the first
+    }
+
+    // TODO add a drop curve step for more precision?
+
+
+    try
+    {
+        opLoft(context, id + "surfaceOutput" + "loftWithoutConnections", {
+                    "profileSubqueries" : roughCurves,
+                    // "guideSubqueries" : guideCurves,
+                    "bodyType" : ToolBodyType.SURFACE,
+                    "makePeriodic" : periodicity.loftIsPeriodic,
+                });
+
+    }
+    catch (error)
+    {
+        var connections = createConnectionsFromProfiles(roughCurves, 0.5); // some lofts fail inexplicably without connections added
+
+        opLoft(context, id + "surfaceOutput" + "loftWithConnections", {
+                    "profileSubqueries" : roughCurves,
+                    // "guideSubqueries" : guideCurves,
+                    "bodyType" : ToolBodyType.SURFACE,
+                    "makePeriodic" : periodicity.loftIsPeriodic,
+                    "connections" : connections
+                });
+    }
+
+
+    if (definition.previewGrid)
+    {
+        addDebugEntities(context, qUnion(roughCurves), DebugColor.MAGENTA);
+        // if (definition.addLoftGuides)
+        //     addDebugEntities(context, qUnion(guideCurves), DebugColor.ORANGE);
+    }
+
+    return qCreatedBy(id + "surfaceOutput", EntityType.BODY);
+}
+
+
+/**
+ * Based on the input surface periodicity. Outputs "UIsPeriodic", "VIsPeriodic", "inputEdgesArePeriodic", "loftIsPeriodic"
+ */
+function evInputPeriodicity(context is Context, definition is map) returns map
+{
+    const toolPeriodicity = evFacePeriodicity(context, { "face" : definition.tool });
+    const UIsPeriodic = !definition.flipCurveDirection ? toolPeriodicity[0] : toolPeriodicity[1];
+    const VIsPeriodic = !definition.flipCurveDirection ? toolPeriodicity[1] : toolPeriodicity[0];
+    const inputEdgesArePeriodic = !definition.flipCurveDirection ? toolPeriodicity[1] : toolPeriodicity[0]; // are the input section curves of a potential loft closed loops?
+    const loftIsPeriodic = !definition.flipCurveDirection ? toolPeriodicity[0] : toolPeriodicity[1]; // should the loft itself be a closed loop? It's rotated 90° from the edges because if cross sections are in U direction we loft in V.
+
+    return { "UIsPeriodic" : UIsPeriodic, "VIsPeriodic" : VIsPeriodic, "inputEdgesArePeriodic" : inputEdgesArePeriodic, "loftIsPeriodic" : loftIsPeriodic };
+}
+
+/**
+ * Takes an array of arrays of points and creates fit splines through the origins of each row of planes.
+ */
+function createSplinesThroughPoints(context is Context, id is Id, definition is map) returns Query
+{
+    const pointGrid = definition.pointGrid;
+
+    for (var i, row in pointGrid)
+    {
+        opFitSpline(context, id + "fitSpline" + i, {
+                    "points" : row
+                });
+    }
+
+    return qCreatedBy(id + "fitSpline", EntityType.EDGE);
+}
+
+/**
+ * Projects an array of arrays of points onto the target body according to the DrapeProjectionType. Returns an array of arrays of points.
+ */
+function createPointsOnTarget(context is Context, id is Id, definition is map) returns array
+{
+
+    var points;
+
+    if (definition.drapeProjectionType == DrapeProjectionType.NORMAL_TO_TOOL)
+    {
+        points = drapeProjectionNormalToTool(context, id, definition);
+    }
+    else if (definition.drapeProjectionType == DrapeProjectionType.NORMAL_TO_TARGET)
+    {
+        points = drapeProjectionNormalToTarget(context, id, definition);
+    }
+    else if (definition.drapeProjectionType == DrapeProjectionType.DIRECTION)
+    {
+        verifyNonemptyQuery(context, definition, "direction", "Select a direction.");
+
+        points = drapeProjectionByDirection(context, id, definition);
+    }
+
+    if (definition.previewGrid)
+        debugPoints(concatenateArrays(points), context, DebugColor.MAGENTA);
+
+
+    return points;
+}
+
+/**
+ * Projects an array of points in the required direction and debugs the result
+ */
+function projectRowByRaycast(context is Context, row is array, definition is map) returns array
+{
+    const byDirection = definition.drapeProjectionType == DrapeProjectionType.DIRECTION;
+
+    var direction;
+
+    if (byDirection)
+        direction = definition.flipProjectionDirection ? -extractDirection(context, definition.direction) : extractDirection(context, definition.direction);
+
+    const boxDiagonal = evBox3d(context, { "topology" : qUnion([definition.tool, definition.target]), "tight" : false })->box3dDiagonalLength();
+
+    var projectedRowPoints = [];
+    for (var rowPlane in row)
+    {
+        if (!byDirection)
+            direction = definition.flipDirection ? -rowPlane.normal : rowPlane.normal;
+
+
+        var projectedPoint;
+
+        var rayCast;
+
+        if (byDirection)
+        {
+            rayCast = evRaycast(context, {
+                        "entities" : definition.target,
+                        "ray" : line(rowPlane.origin, direction),
+                        "closest" : true,
+                        "includeIntersectionsBehind" : false
+                    });
+        }
+        else // Normal to tool
+        {
+            rayCast = evRaycast(context, {
+                        "entities" : definition.target,
+                        "ray" : line(rowPlane.origin, direction),
+                        "closest" : false,
+                        "includeIntersectionsBehind" : true
+                    });
+        }
+
+        var rayHitsTarget = size(rayCast) > 0;
+
+        if (rayHitsTarget)
+        {
+            projectedPoint = getClosestRaycastResult(rayCast).intersection;
+
+            projectedRowPoints = append(projectedRowPoints, projectedPoint);
+            if (definition.previewProjection)
+                addDebugLine(context, rowPlane.origin, projectedPoint, definition.projectionLineColor);
+        }
+        else
+        {
+            addDebugLine(context, rowPlane.origin, rowPlane.origin + direction * boxDiagonal, DebugColor.RED);
+        }
+    }
+    return projectedRowPoints;
+}
+
+/**
+ * Given an array of RaycastResults return the one with the smallest absolute distance value. If "includeIntersectionsBehind" is true for evRaycast() it will return negative distances instead of the actual closest result.
+ */
+function getClosestRaycastResult(raycastResults is array) returns RaycastResult
+{
+    var raycastAbsDistances = [];
+
+    for (var raycast in raycastResults)
+    {
+        raycastAbsDistances = append(raycastAbsDistances, raycast.distance->abs());
+    }
+
+    const closestIndex = indexOf(raycastAbsDistances, min(raycastAbsDistances));
+
+    return raycastResults[closestIndex] as RaycastResult;
+}
+
+/**
+ * Returns an array of arrays of points on the target body projected in a direction onto the tool body.
+ */
+function drapeProjectionByDirection(context is Context, id is Id, definition is map) returns array
+{
+    const planes = createPlanesOnSurface(context, id, definition);
+    const direction = definition.flipDirection ? -extractDirection(context, definition.direction) : extractDirection(context, definition.direction);
+
+    const boxDiagonal = evBox3d(context, { "topology" : qUnion([definition.tool, definition.target]), "tight" : false })->box3dDiagonalLength();
+
+    var projectedPoints = [];
+    for (var row in planes)
+    {
+        const projectedRowPoints = projectRowByRaycast(context, row, definition);
+
+        projectedPoints = append(projectedPoints, projectedRowPoints);
+    }
+
+    return projectedPoints;
+}
+
+/**
+ * Returns an array of arrays of points on the target body projected normal to the target body (i.e. closest to the target body).
+ */
+function drapeProjectionNormalToTarget(context is Context, id is Id, definition is map) returns array
+{
+    const planes = createPlanesOnSurface(context, id, definition);
+
+    var projectedPoints = [];
+    for (var row in planes)
+    {
+        // convert planes to points
+        var rowPoints = [];
+        for (var rowPlane in row)
+        {
+            rowPoints = append(rowPoints, rowPlane.origin);
+        }
+
+        //evPointsDeviation should be a bit faster than a loop of evDistance calls.
+        const rowDeviations = evPointsDeviation(context, {
+                    "points" : rowPoints,
+                    "topologies" : definition.target,
+                    "allDeviations" : true,
+                });
+
+        var projectedRowPoints = [];
+        for (var deviation in rowDeviations)
+        {
+            if (definition.previewProjection)
+                addDebugLine(context, deviation.topologyPoint, deviation.pointPoint, definition.projectionLineColor);
+
+            projectedRowPoints = append(projectedRowPoints, deviation.topologyPoint);
+        }
+
+        projectedPoints = append(projectedPoints, projectedRowPoints);
+    }
+
+    return projectedPoints;
+}
+
+
+/**
+ * Returns an array of arrays of points on the target body projected normal from the tool body
+ */
+function drapeProjectionNormalToTool(context is Context, id is Id, definition is map) returns array
+{
+    const planes = createPlanesOnSurface(context, id, definition);
+
+    var projectedPoints = [];
+    for (var row in planes)
+    {
+        const projectedRowPoints = projectRowByRaycast(context, row, definition);
+
+        projectedPoints = append(projectedPoints, projectedRowPoints);
+    }
+
+    return projectedPoints;
+}
+
+/**
+ * Creates an array of arrays of tangent planes in a grid across a surface. i.e. a table of rows and columns.
+ *
+ * @param definition {{
+ *      @field tool  {query}:
+ * The surface to create points on.
+ *
+ * @field isVDirection {boolean}:
+ *      Flips the UV order.
+ * }}
+ *
+ */
+function createPlanesOnSurface(context is Context, id is Id, definition is map) returns array
+{
+    const vectorGrid = create2DVectorGrid(definition);
+
+    var tanPlanes = [];
+    for (var row in vectorGrid)
+    {
+        const tanPlaneRow = evFaceTangentPlanes(context, {
+                    "face" : definition.tool,
+                    "parameters" : row
+                });
+
+        tanPlanes = append(tanPlanes, tanPlaneRow);
+    }
+
+    return tanPlanes;
+}
+
+/**
+ * Creates an array of arrays of 2D vectors. i.e. a table of rows and columns.
+ *
+ * @param definition {{
+ *      @field uCount {number}:
+ *          The number of U points in the grid.
+ *      @field vCount {number}:
+ *          The number of V points in the grid.
+ *      @field isVDirection {boolean}:
+ *          Swaps rows and columns.
+ * }}
+ *
+ * @returns {Array} : An array of arrays of 2D vectors. i.e. a table of rows and columns.
+ */
+function create2DVectorGrid(definition is map) returns array
+{
+
+    var vectors = [];
+    const uCount = !definition.flipCurveDirection ? definition.uCount : definition.vCount;
+    const vCount = !definition.flipCurveDirection ? definition.vCount : definition.uCount;
+
+    for (var u = 0; u < uCount; u += 1)
+    {
+        var row = [];
+        for (var v = 0; v < vCount; v += 1)
+        {
+            var newVector = vector(u / (uCount - 1), v / (vCount - 1));
+
+            if (definition.flipCurveDirection)
+                newVector = reverse(newVector);
+
+            row = append(row, newVector);
+        }
+        vectors = append(vectors, row);
+    }
+
+    return vectors;
+}
+
+/**
+ * Options for how the UV from the tool surface projects onto the target body.
+ */
+export enum DrapeProjectionType
+{
+    annotation { "Name" : "Normal to tool" }
+    NORMAL_TO_TOOL,
+
+    annotation { "Name" : "Normal to target" }
+    NORMAL_TO_TARGET,
+
+    annotation { "Name" : "Direction" }
+    DIRECTION,
+}
+
+/**
+ * Options for how the draped surface will be constructed
+ */
+export enum DrapeType
+{
+    annotation { "Name" : "Loft" }
+    LOFT,
+
+    annotation { "Name" : "B-spline surface" }
+    B_SPLINE_SURFACE,
+
+    annotation { "Name" : "Constrained surface" }
+    CONSTRAINED_SURFACE,
+
+    annotation { "Name" : "Fill" }
+    FILL,
+}
+
+//borrowed from Lana's code here: https://cad.onshape.com/documents/fcf31e8bc171b06037008400/v/7e1b5b2304e2bd6d9223a41a/e/e076332e1669ea9babcaf65b
+function toIdentity(id is Id) returns string
+{
+    var out is string = id[0];
+    for (var i = 1; i < size(id); i += 1)
+    {
+        out ~= "." ~ id[i];
+    }
+    return out;
+}
+
+function createConnectionsFromProfiles(profiles is array, param is number) returns array
+{
+    return [{ "connectionEntities" : qUnion(profiles), "connectionEdges" : profiles, "connectionEdgeParameters" : resize([], size(profiles), param) }];
+}
+
+// /**
+//  * functionDescription
+//  *
+//  * @param definition {{
+//  *      @field input1  {query}:
+//  * input1Description
+//  * }}
+//  *
+//  */
+// function functionTemplate(context is Context, id is Id, definition is map) returns array
+// {
+//     var result;
+
+
+
+//     return result;
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
