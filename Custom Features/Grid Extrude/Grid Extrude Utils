@@ -1,0 +1,375 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2022;
+import(path : "onshape/std/common.fs", version : "2022.0");
+
+// Imports used in interface
+export import(path : "onshape/std/extrudeCommon.fs", version : "2022.0");
+export import(path : "onshape/std/query.fs", version : "2022.0");
+export import(path : "onshape/std/tool.fs", version : "2022.0");
+
+export import(path : "9f4c9835d8018ff7dbdb5683/8ca16a35e47d48480105066b/c60f4a6e12f07acee647a2a1", version : "198e65e227da4b79f32bd021");
+export import(path : "9f4c9835d8018ff7dbdb5683/8ca16a35e47d48480105066b/f937aebd788e8d724a4de67b", version : "4c35f556d29c02d51313c101");
+
+export predicate mainViewExtrudePredicate(definition is map)
+{
+    annotation { "Name" : "Faces and sketch regions to extrude",
+                "Filter" : ((AllowFlattenedGeometry.YES && SketchObject.YES && EntityType.FACE) ||
+                        (GeometryType.PLANE && AllowFlattenedGeometry.NO && EntityType.FACE)) && ConstructionObject.NO
+            }
+    definition.entities is Query;
+
+    annotation { "Name" : "End type" }
+    definition.endBound is BoundingType;
+
+    annotation { "Name" : "Opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+    definition.oppositeDirection is boolean;
+
+    extrudeBoundParametersPredicate(definition);
+
+    // extrudeDirectionPredicate(definition);
+
+    // extrudeOffsetPredicate(definition);
+
+    if (definition.endBound == BoundingType.BLIND || definition.endBound == BoundingType.THROUGH_ALL)
+    {
+        annotation { "Name" : "Symmetric" }
+        definition.symmetric is boolean;
+    }
+
+    annotation { "Name" : "Draft", "UIHint" : ["DISPLAY_SHORT", "FIRST_IN_ROW"] }
+    definition.hasDraft is boolean;
+
+    if (definition.hasDraft == true)
+    {
+        annotation { "Name" : "Draft angle", "UIHint" : UIHint.DISPLAY_SHORT }
+        isAngle(definition.draftAngle, ANGLE_STRICT_90_BOUNDS);
+
+        annotation { "Name" : "Opposite direction", "Column Name" : "Draft opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+        definition.draftPullDirection is boolean;
+    }
+
+
+    if (!isSymmetricExtrude(definition))
+    {
+        annotation { "Name" : "Second end position",
+                    "UIHint" : UIHint.FIRST_IN_ROW }
+        definition.hasSecondDirection is boolean;
+
+        annotation { "Group Name" : "Second end position", "Driving Parameter" : "hasSecondDirection", "Collapsed By Default" : false }
+        {
+            if (definition.hasSecondDirection)
+            {
+                annotation { "Name" : "End type", "Column Name" : "Second end type" }
+                definition.secondDirectionBound is BoundingType;
+
+                annotation { "Name" : "Opposite direction", "Column Name" : "Second opposite direction",
+                            "UIHint" : UIHint.OPPOSITE_DIRECTION, "Default" : true }
+                definition.secondDirectionOppositeDirection is boolean;
+
+                extrudeSecondDirectionBoundParametersPredicate(definition);
+
+                if ((definition.secondDirectionOppositeDirection && !definition.oppositeDirection) ||
+                    (!definition.secondDirectionOppositeDirection && definition.oppositeDirection))
+                {
+                    annotation { "Name" : "Draft", "Column Name" : "Second draft", "UIHint" : ["DISPLAY_SHORT", "FIRST_IN_ROW"] }
+                    definition.hasSecondDirectionDraft is boolean;
+
+                    if (definition.hasSecondDirectionDraft)
+                    {
+                        annotation { "Name" : "Draft angle", "Column Name" : "Second draft angle", "UIHint" : UIHint.DISPLAY_SHORT }
+                        isAngle(definition.secondDirectionDraftAngle, ANGLE_STRICT_90_BOUNDS);
+
+                        annotation { "Name" : "Opposite direction", "Column Name" : "Second draft opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+                        definition.secondDirectionDraftPullDirection is boolean;
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+
+export predicate extrudeGridPredicate(definition is map)
+{
+    annotation { "Group Name" : "Grid", "Collapsed By Default" : false }
+    {
+        annotation { "Name" : "Grid type", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE] }
+        definition.GridShapeType is GridShapeType;
+
+        annotation { "Name" : "Grid center (optional)",
+                    "Filter" : QueryFilterCompound.ALLOWS_VERTEX, "MaxNumberOfPicks" : 1,
+                    "Description" : "Without a center selected, the grid centers on the first face selected, but may be positioned unpredictably. When a point or mate connector is selected, that point is projected onto the plane of the first selection to become the grid center."
+                }
+        definition.gridCenter is Query;
+
+        annotation { "Name" : "Grid direction (optional)",
+                    "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1,
+                    "Description" : "Without a direction selected, the grid may orient unpredictably."
+                }
+        definition.gridDirection is Query;
+
+        annotation { "Name" : "Grid angle",
+                    "Description" : "Rotate the grid relative to the grid direction."
+                }
+        isAngle(definition.gridAngle, { (degree) : [-360, 0, 360] } as AngleBoundSpec);
+
+        annotation { "Name" : "Flip grid angle", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+        definition.flipGridAngle is boolean;
+
+        annotation { "Name" : "Cell width",
+                // "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE
+                }
+        isLength(definition.width, { (millimeter) : [1e-6, 25, 1e5] } as LengthBoundSpec);
+
+        if (definition.GridShapeType == GridShapeType.Rectangle)
+        {
+            annotation { "Name" : "Cell length",
+                    // "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE
+                    }
+            isLength(definition.length, { (millimeter) : [1e-6, 40, 1e5] } as LengthBoundSpec);
+        }
+
+        annotation { "Name" : "Cell gap",
+                    // "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                    "Description" : "Extra space between the grid cells which forms ribs in normal mode, or gaps when `invert grid` is selected.",
+                }
+        isLength(definition.ribThickness, { (millimeter) : [0, 3, 1e5] } as LengthBoundSpec);
+
+        if (definition.GridShapeType != GridShapeType.CircleHex && definition.GridShapeType != GridShapeType.CircleSq)
+        {
+            annotation { "Name" : "Corner radius" }
+            isLength(definition.cornerRadius, { (millimeter) : [0, 0, 1e6] } as LengthBoundSpec);
+        }
+
+        annotation { "Name" : "Add boundary", "Default" : false }
+        definition.addBoundary is boolean;
+
+        
+        if (definition.addBoundary)
+        {
+            // annotation { "Name" : "Alignment", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            // definition.boundaryAlignmentType is BoundaryAlignmentType;
+
+            annotation { "Name" : "Mid plane" }
+            definition.boundaryMidPlane is boolean;
+
+            if (!definition.boundaryMidPlane)
+            {
+                annotation { "Name" : "Thickness 1" }
+                isLength(definition.boundaryThickness1, { (millimeter) : [0, 1.5, 1e5] } as LengthBoundSpec);
+
+                annotation { "Name" : "Flip boundary", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.flipBoundary is boolean;
+
+                annotation { "Name" : "Thickness 2" }
+                isLength(definition.boundaryThickness2, { (millimeter) : [0, 1.5, 1e5] } as LengthBoundSpec);
+
+            }
+            else
+            {
+                annotation { "Name" : "Thickness" }
+                isLength(definition.boundaryMidThickness, { (millimeter) : [0, 3, 1e5] } as LengthBoundSpec);
+            }
+        }
+
+        annotation { "Name" : "Invert grid", "Default" : false }
+        definition.invertGrid is boolean;
+
+        annotation { "Name" : "Preview grid points", "Default" : false, "Description" : "Preview the grid points to troubleshoot long regeneration times. If there are a lot of points outside of the selected faces, consider splitting up the faces into a few faces, since each face generates its own grid. For example, an L shaped face is inefficient, so it could be split into two rectangles for better performance. Turn off the preview when finished for the best performance." }
+        definition.previewPoints is boolean;
+    }
+}
+
+export predicate extrudeDirectionPredicate(definition is map)
+{
+    annotation { "Name" : "Direction" }
+    definition.hasExtrudeDirection is boolean;
+
+    annotation { "Group Name" : "Direction", "Driving Parameter" : "hasExtrudeDirection", "Collapsed By Default" : false }
+    {
+        if (definition.hasExtrudeDirection)
+        {
+            annotation { "Name" : "Extrude direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+            definition.extrudeDirection is Query;
+        }
+    }
+}
+
+export enum GridShapeType
+{
+    Hexagon,
+    Triangle,
+    Square,
+    Rectangle,
+    annotation { "Name" : "Circle (hexagonal grid)" }
+    CircleHex,
+    annotation { "Name" : "Circle (square grid)" }
+    CircleSq,
+}
+
+export enum BoundaryAlignmentType
+{
+    Inside,
+    Outside,
+    Centered,
+}
+
+export function getGridCenter(context is Context, definition is map) returns Vector
+{
+    var result;
+
+    const plane = evPlane(context, { "face" : definition.entities->qNthElement(0) });
+
+    if (!isQueryEmpty(context, definition.gridCenter))
+        result = project(plane, evVertexPoint(context, { "vertex" : definition.gridCenter }));
+
+    else
+        result = plane.origin;
+
+    return result;
+}
+
+
+export type GridInfo typecheck canBeGridInfo;
+
+export predicate canBeGridInfo(value)
+{
+    value is map;
+
+    value.startPoint is Vector;
+    value.endPoint is Vector;
+
+    value.xStartCount is number;
+    value.xEndCount is number;
+
+    value.yStartCount is number;
+    value.yEndCount is number;
+}
+
+/**
+ * @return gridInfo {map} {{
+ *      @field xStartCount {number} : The number of instances that fit between gridOrigin and xStart. Can be negative if the minCorner is in the negative x direction.
+ *      @field xEndCount {number} : The number of instances that fit between gridOrigin and xEnd. Can be negative if the maxCorner is in the negative x direction.
+ *      @field xCount {number} : The number of x instances that fit inside of the box.
+ *      @field xStart {valueWithUnits} : The x component of the pattern start vector.
+ *      @field xEnd {valueWithUnits} : The x component of the pattern end vector
+ *      @field yStartCount {number} : The number of instances that fit between gridOrigin and yStart. Can be negative if the minCorner is in the negative y direction.
+ *      @field yEndCount {number} : The number of instances that fit between gridOrigin and yEnd. Can be negative if the maxCorner is in the negative y direction.
+ *      @field yCount {number} : The number of y instances that fit inside of the box.
+ *      @field yStart {valueWithUnits} : The y component of the pattern start vector.
+ *      @field yEnd {valueWithUnits} : The y component of the pattern end vector
+ *      @field startPoint {vector} : the first point in the pattern (which should fall outside of the bounding box near the minCorner)
+ *      @field endPoint {vector} : the last point in the pattern (which should fall outside of the bounding box near the maxCorner)
+ * }}
+ */
+export function gridInfo(definition is map, boundingBox is Box3d) returns GridInfo
+{
+    var result = {};
+
+    const xMin = boundingBox.minCorner[0]; // x component of the min box corner
+    const xMax = boundingBox.maxCorner[0]; // x component of the max box corner
+    const yMin = boundingBox.minCorner[1]; // y component of the min box corner
+    const yMax = boundingBox.maxCorner[1]; // y component of the max box corner
+
+    result.xStartCount = floor(xMin / definition.xSpacing); // the number of instances that fit between gridOrigin and xStart. Can be negative if the minCorner is in the negative x direction.
+    result.xEndCount = ceil(xMax / definition.xSpacing) + 1; // the number of instances that fit between gridOrigin and xEnd. Can be negative if the maxCorner is in the negative x direction.
+    // result.xCount = result.xEndCount - result.xStartCount; // the number of x instances that fit inside of the box
+    const xStart = result.xStartCount * definition.xSpacing; // the x component of the pattern start vector
+    const xEnd = result.xEndCount * definition.xSpacing; // the x component of the pattern end vector
+
+    result.yStartCount = floor(yMin / definition.ySpacing); // the number of instances that fit between gridOrigin and yStart. Can be negative if the minCorner is in the negative y direction.
+    result.yEndCount = ceil(yMax / definition.ySpacing) + 1; // the number of instances that fit between gridOrigin and yEnd. Can be negative if the mayCorner is in the negative y direction.
+    // result.yCount = result.yEndCount - result.yStartCount; // the number of y instances that fit inside of the box
+    const yStart = result.yStartCount * definition.ySpacing; // the y component of the pattern start vector
+    const yEnd = result.yEndCount * definition.ySpacing; // the y component of the pattern end vector
+
+    result.startPoint = vector(xStart, yStart, 0 * meter);
+    result.endPoint = vector(xEnd, yEnd, 0 * meter);
+
+    return result as GridInfo;
+}
+
+/**
+ * @return {array}: An array of points forming the grid.
+ */
+export function getGridPointsInBox(definition is map, boundingBox is Box3d) returns map
+{
+    const gridInfo = gridInfo(definition, boundingBox);
+
+    var points = [];
+    var instanceNames = [];
+    var transforms = [];
+
+    const origin = definition.transformToGridCoord * WORLD_ORIGIN;
+
+    for (var i = gridInfo.yStartCount; i < gridInfo.yEndCount; i += 1) // Controls Y direction (row index)
+    {
+        for (var j = gridInfo.xStartCount; j < gridInfo.xEndCount; j += 1) // Controls X direction (column index)
+        {
+            if (!(i == 0 && j == 0)) // removes the origin instance, which we don't need to duplicate.
+            {
+                var shiftRow = i % 2 != 0; //shift odd rows over for hexagonal tiling.
+                const rowShift = shiftRow && definition.isHexagonal ? definition.xSpacing / 2 : 0 * meter;
+                const x = definition.xSpacing * j + rowShift;
+                const y = definition.ySpacing * i;
+                const newPoint = vector(x, y, 0 * meter);
+                const newTransformedPoint = definition.transformToGridCoord * newPoint;
+                points = append(points, newTransformedPoint);
+                transforms = append(transforms, transform(newTransformedPoint - origin));
+                instanceNames = append(instanceNames, "x" ~ j ~ "y" ~ i);
+            }
+        }
+        // shiftRow = !shiftRow; // making the next row the opposite shift of this one
+    }
+
+    return { "points" : points, "instanceNames" : instanceNames, "transforms" : transforms };
+}
+
+
+/**
+ * Takes a map containing an array of points, and sets of 1:1 corresponding arrays (i.e. transforms for the points and instanceNames for the points), and returns the map without duplicate points and their corresponding info.
+ */
+export function deduplicatePointsAndCorrespondingInfo(arrays is map) returns map
+{
+    // The fancy way
+    // return foldArray(clusterPoints(points, TOLERANCE.zeroLength * meter), { "points" : [], "instanceNames" : [] }, function(result, cluster)
+    //     {
+    //         return result->insertIntoMapOfArrays("points", points[cluster[0]])->insertIntoMapOfArrays("instanceNames", instanceNames[cluster[0]]);
+    //     });
+    var result = {};
+
+    var newPoints = [];
+    var newInstanceNames = [];
+    const pointClusters = clusterPoints(arrays.points, TOLERANCE.zeroLength * meter);
+    for (var key, value in arrays)
+    {
+        result[key] = [];
+        for (var cluster in pointClusters)
+        {
+            result[key] = append(result[key], value[cluster[0]]);
+        }
+    }
+
+    return result;
+}
+
+export function processGridDirection(context is Context, gridDirection is Query, sketchPlane is Plane) returns Vector
+{
+    const direction = extractDirection(context, gridDirection);
+    const directionLine = line(sketchPlane.origin, direction);
+    const positiveLine = line(sketchPlane.origin, sketchPlane.normal);
+    const negativeLine = line(sketchPlane.origin, -sketchPlane.normal);
+    if (tolerantEquals(directionLine, positiveLine) || tolerantEquals(directionLine, negativeLine))
+    {
+        throw regenError("The grid direction must not match the extrusion direction.");
+    }
+    else
+    {
+        return project(sketchPlane, directionLine).direction; // returns the projected direction so the user doesn't have to choose a direction that is exactly perpindicular to the extrusion direction.
+    }
+}
+
+
