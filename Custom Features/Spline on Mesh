@@ -1,0 +1,144 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2581;
+import(path : "onshape/std/common.fs", version : "2581.0");
+export import(path : "onshape/std/projectiontype.gen.fs", version : "2581.0");
+import(path : "4cbe0127e5dfd2e5b9d6c70e/47b607d2bfb76ae29a11bc1a/58ee565b9814988ff13504d8", version : "a084066e6dc48d685edddbdc");
+icon::import(path : "775a7a7b2ba4ba4f640b982d", version : "bcf3b155201b08baca2a17a0");
+
+
+annotation { "Feature Type Name" : "Spline on mesh",
+        "Feature Type Description" : "",
+        "Editing Logic Function" : "splineOnMeshEditingLogic",
+        "Icon" : icon::BLOB_DATA }
+export const splineOnMesh = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Mesh verticies", "Filter" : EntityType.VERTEX && AllowMeshGeometry.YES, "UIHint" : [UIHint.INITIAL_FOCUS, UIHint.ALLOW_QUERY_ORDER] }
+        definition.points is Query;
+
+        annotation { "Name" : "Target mesh faces", "Filter" : EntityType.FACE && AllowMeshGeometry.YES }
+        definition.target is Query;
+
+        annotation { "Name" : "Closed spline" }
+        definition.closed is boolean;
+
+        curveApproximationPredicateModified(definition);
+
+    }
+    {
+
+        verifyNonemptyQuery(context, definition, "points", "Select mesh verticies.");
+        verifyNonemptyQuery(context, definition, "target", "Select target mesh.");
+
+        const meshToPullTo = definition.target;
+
+        var pointsList = [];
+        for (var point in evaluateQuery(context, definition.points))
+        {
+            pointsList = append(pointsList, evVertexPoint(context, { "vertex" : point }));
+        }
+
+        if (definition.closed)
+        {
+            pointsList = append(pointsList, pointsList[0]);
+        }
+
+        opFitSpline(context, id + "fitSpline", { "points" : pointsList });
+
+        const fitSpline = qCreatedBy(id + "fitSpline", EntityType.EDGE);
+
+        opDropCurve(context, id + "dropCurve", {
+                    "tools" : fitSpline,
+                    "targets" : meshToPullTo,
+                    "projectionType" : ProjectionType.NORMAL_TO_TARGET
+                });
+
+        opDeleteBodies(context, id + "deleteBodies", { "entities" : qCreatedBy(id + "fitSpline") });
+
+        approximateResultsModified(context, id, definition, true);
+
+    });
+
+export function getTargetMesh(context is Context, points is Query) returns Query
+{
+    var sourceMeshFaces = [];
+    for (var point in evaluateQuery(context, points))
+    {
+        const sourceMeshFace = qSourceMesh(point, EntityType.FACE);
+        
+        debug(context, sourceMeshFace, DebugColor.RED);
+
+        if (!isQueryEmpty(context, sourceMeshFace))
+        {
+            sourceMeshFaces = append(sourceMeshFaces, sourceMeshFace);
+        }
+    }
+    println(sourceMeshFaces);
+    return sourceMeshFaces == [] ? qNothing() : qUnion(sourceMeshFaces);
+}
+
+
+export enum SplineOnMeshMode
+{
+    Create,
+    Insert,
+    Delete
+}
+
+export function splineOnMeshEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (oldDefinition.points != definition.points && isCreating && isQueryEmpty(context, definition.target))
+    {
+        const target = getTargetMesh(context, definition.points);
+
+        if (!isQueryEmpty(context, target))
+        {
+            definition.target = target;
+            return definition;
+        }
+    }
+    return definition;
+}
+
+/**
+ * A predicate to add curve approximation parameters to a feature.
+ */
+export predicate curveApproximationPredicateNewDefaults(definition is map)
+{
+    annotation { "Name" : "Approximate", "Default" : true }
+    definition.approximate is boolean;
+    annotation { "Group Name" : "Approximation parameters", "Driving Parameter" : "approximate", "Collapsed By Default" : false }
+    {
+        if (definition.approximate)
+        {
+            annotation { "Name" : "Target degree", "Column Name" : "Approximation target degree" }
+            isInteger(definition.approximationDegree, DEGREE_BOUND);
+
+            annotation { "Name" : "Maximum control points" }
+            isInteger(definition.approximationMaxCPs, { (unitless) : [4, 15, MAX_CONTROL_POINTS] } as IntegerBoundSpec);
+
+            annotation { "Name" : "Tolerance" }
+            isLength(definition.approximationTolerance, TOLERANCE_BOUND);
+
+            annotation { "Name" : "Keep start derivative" }
+            definition.keepStartDerivative is boolean;
+
+            annotation { "Name" : "Keep end derivative" }
+            definition.keepEndDerivative is boolean;
+
+            annotation { "Name" : "Show deviation" }
+            definition.approximationShowDeviation is boolean;
+            annotation { "Group Name" : "Show deviation", "Driving Parameter" : "approximationShowDeviation", "Collapsed By Default" : false }
+            {
+                if (definition.approximationShowDeviation)
+                {
+                    annotation { "Name" : "Maximum deviation", "UIHint" : UIHint.READ_ONLY }
+                    isLength(definition.maxDeviation, NONNEGATIVE_ZERO_DEFAULT_LENGTH_BOUNDS);
+                }
+            }
+        }
+    }
+}
