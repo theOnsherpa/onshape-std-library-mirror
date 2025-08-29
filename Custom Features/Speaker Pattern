@@ -1,0 +1,513 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1188;
+import(path : "onshape/std/geometry.fs", version : "1188.0");
+
+icon::import(path : "76eca36ef72b68e39aeaf2ce", version : "5ff90defab79e7f5a56d666b");
+
+//Imports used in interface
+export import(path : "onshape/std/booleanoperationtype.gen.fs", version : "1188.0");
+export import(path : "onshape/std/tool.fs", version : "1188.0");
+export import(path : "onshape/std/extrudeCommon.fs", version : "1188.0");
+
+
+//Imports used internally
+import(path : "onshape/std/drafttype.gen.fs", version : "1188.0");
+
+// Enum options for pattern style
+export enum speakerPatternType
+{
+    annotation { "Name" : "Radial" }
+    RADIAL,
+    annotation { "Name" : "Fibonacci" }
+    FIBONACCI,
+    annotation { "Name" : "Slot circle" }
+    SLOT
+}
+
+// Default Values
+export const SPEAKER_PATTERN_BOUNDS =
+{
+            (meter) : [-500, 0.001, 500],
+            (centimeter) : .2,
+            (millimeter) : 2,
+            (inch) : .1,
+            (foot) : 0.1,
+            (yard) : 0.025
+        } as LengthBoundSpec;
+export const SLOT_OFFSET_BOUNDS =
+{
+            (meter) : [-500, 0.001, 500],
+            (centimeter) : .1,
+            (millimeter) : 1,
+            (inch) : .05,
+            (foot) : 0.05,
+            (yard) : 0.0125
+        } as LengthBoundSpec;
+
+export const RADIAL_COUNT_BOUNDS =
+{
+            (unitless) : [1, 3, 1e5]
+        } as IntegerBoundSpec;
+export const FIBONACCI_COUNT_BOUNDS =
+{
+            (unitless) : [1, 25, 1e5]
+        } as IntegerBoundSpec;
+
+
+// UI Definition
+annotation { "Feature Type Name" : "Speaker Pattern", "Icon" : icon::BLOB_DATA }
+export const SpeakerPattern = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        booleanStepTypePredicate(definition);
+        annotation { "Name" : "Center Point", "Filter" : EntityType.VERTEX && SketchObject.YES || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+        definition.center is Query;
+        annotation { "Name" : "Choose pattern body" }
+        definition.customBodyBool is boolean;
+        if (definition.customBodyBool)
+        {
+            annotation { "Name" : "Body to pattern", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+            definition.customBody is Query;
+            annotation { "Name" : "Body center point", "Filter" : EntityType.VERTEX && SketchObject.YES || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+            definition.customBodyCenter is Query;
+        }
+        annotation { "Name" : "Pattern Type", "UIHint" : "SHOW_LABEL" }
+        definition.speakerPatternType is speakerPatternType;
+
+        
+        // Radial UI
+        if (definition.speakerPatternType == speakerPatternType.RADIAL)
+        {
+            annotation { "Name" : "Instance Diameter" }
+            isLength(definition.radialDia, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Target Gap" }
+            isLength(definition.gap, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Rings" }
+            isInteger(definition.rings, RADIAL_COUNT_BOUNDS);
+        }
+
+        // Slot Circle UI
+        if (definition.speakerPatternType == speakerPatternType.SLOT)
+        {
+            annotation { "Name" : "Pattern Diameter" }
+            isLength(definition.dia, LENGTH_BOUNDS);
+            annotation { "Name" : "Slot width" }
+            isLength(definition.slotWidth, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Minimum gap" }
+            isLength(definition.minGap, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "End Offset" }
+            isLength(definition.endOffset, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Add cross bracing", "default" : false }
+            definition.bracing is boolean;
+            if (definition.bracing == true)
+            {
+                annotation { "Name" : "Number of cross braces" }
+                isInteger(definition.numBraces, POSITIVE_COUNT_BOUNDS);
+            }
+        }
+
+        // Fibonacci UI
+        if (definition.speakerPatternType == speakerPatternType.FIBONACCI)
+        {
+            annotation { "Name" : "Instance Diameter" }
+            isLength(definition.fibonacciDia, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Pattern Scale" }
+            isLength(definition.scale, SPEAKER_PATTERN_BOUNDS);
+            annotation { "Name" : "Hole Count" }
+            isInteger(definition.count, FIBONACCI_COUNT_BOUNDS);
+        }
+        // Shared UI elements
+        annotation { "Name" : "Depth", }
+        isLength(definition.depth, SPEAKER_PATTERN_BOUNDS);
+        annotation { "Name" : "Flip Direction", "UIHint" : "OPPOSITE_DIRECTION" }
+        definition.flip is boolean;
+        annotation { "Name" : "Draft", }
+        definition.addDraft is boolean;
+        if (definition.addDraft)
+        {
+            annotation { "Name" : "Draft" }
+            isAngle(definition.angle, ANGLE_STRICT_90_BOUNDS);
+            annotation { "Name" : "Flip Draft", "UIHint" : "OPPOSITE_DIRECTION_CIRCULAR" }
+            definition.flipDraft is boolean;
+        }
+        booleanStepScopePredicate(definition);
+    }
+    {
+        // shared variables
+        var depth = definition.depth;
+        var angle = definition.angle;
+        var count = definition.count;
+        var center = definition.center;
+        var partCenter = definition.customBodyCenter;
+
+        // Radial variables
+        var dia;
+        var dist;
+        var gap = definition.gap;
+        if (definition.speakerPatternType == speakerPatternType.RADIAL)
+        {
+            dia = definition.radialDia;
+            dist = dia + gap;
+        }
+        if (definition.speakerPatternType == speakerPatternType.FIBONACCI)
+        {
+            dia = definition.fibonacciDia;
+            dist  = dia + gap;
+        }
+        var rings = definition.rings;
+
+
+        const goldenAngle = (3 - sqrt(5)) * PI * radian;
+        var scale = definition.scale;
+
+        // slot pattern variables
+        var patternDia = definition.dia;
+        var slotWidth = definition.slotWidth;
+        var slotRad = slotWidth / 2;
+        var slotPatternDia = patternDia - slotWidth;
+        var slotPatternRad = slotPatternDia / 2;
+        var endOffset = definition.endOffset;
+        var slotNum = floor((slotPatternDia - endOffset) / (definition.slotWidth + definition.minGap));
+        var divisions = slotNum - 1;
+        var y;
+        var topY;
+        var bottomY;
+        var x;
+        var increment = slotPatternDia / (divisions) - (endOffset / divisions * 2);
+
+
+        // find normal for point or mate connector selection then set up some derrivative variables for use in flipped directions later
+        var normal;
+        var partNormal;
+
+            try silent
+            {
+                normal = evOwnerSketchPlane(context, {
+                                "entity" : center
+                            }).normal;
+            }
+            try silent
+            {
+                normal = evMateConnector(context, {
+                                "mateConnector" : center
+                            }).zAxis;
+            }
+
+            try silent
+            {
+                partNormal = evOwnerSketchPlane(context, {
+                                "entity" : partCenter
+                            }).normal;
+            }
+            try silent
+            {
+                partNormal = evMateConnector(context, {
+                                "mateConnector" : partCenter
+                            }).zAxis;
+            }
+        
+        var extrudeNormal = normal;
+        var draftNormal = normal;
+        var skplane;
+        
+        // create sketch plane
+        var origin = evVertexPoint(context, {
+                "vertex" : center
+            });
+            
+        // Either use sketch plane as plane for points, or us mate connector cSys as plane so rotation is available
+        try silent
+        {
+            skplane = plane(origin, normal);
+        }
+        try silent
+        {
+            skplane = plane(evMateConnector(context, {
+                    "mateConnector" : center
+            }));
+        }
+        var neutralPlane = opPlane(context, id + "plane1", {
+                "plane" : skplane,
+                "width" : 6 * inch,
+                "height" : 6 * inch
+            });
+        neutralPlane = qCreatedBy(id + "plane1", EntityType.FACE);
+
+        //create sketch
+        var theSketch = newSketchOnPlane(context, id + "sketch1", {
+                "sketchPlane" : skplane
+            });
+
+
+        // sketch circle for Radial and Fibonacci
+        if ((definition.speakerPatternType == speakerPatternType.RADIAL) || (definition.speakerPatternType == speakerPatternType.FIBONACCI))
+        {
+            skCircle(theSketch, "circle1", {
+                        "center" : vector(0, 0) * inch,
+                        "radius" : dia / 2
+                    });
+        }
+
+        // sketch slots for Slot
+        if (definition.speakerPatternType == speakerPatternType.SLOT)
+        {
+            for (var i = 0; i < slotNum; i += 1)
+            {
+                y = slotPatternRad - endOffset - (increment * i);
+                x = abs(sqrt(slotPatternRad ^ 2 - y ^ 2));
+                topY = y + slotRad;
+                bottomY = y - slotRad;
+
+                skLineSegment(theSketch, "line1" ~ toString(i), {
+                            "start" : vector(x, topY),
+                            "end" : vector(-x, topY)
+                        });
+                skLineSegment(theSketch, "line2" ~ toString(i), {
+                            "start" : vector(x, bottomY),
+                            "end" : vector(-x, bottomY)
+                        });
+                skArc(theSketch, "arc1" ~ toString(i), {
+                            "start" : vector(x, topY),
+                            "mid" : vector(x + slotRad, y),
+                            "end" : vector(x, bottomY)
+                        });
+                skArc(theSketch, "arc2" ~ toString(i), {
+                            "start" : vector(-x, topY),
+                            "mid" : vector(-x - slotRad, y),
+                            "end" : vector(-x, bottomY)
+                        });
+            }
+        }
+
+        // Solve Sketch
+        skSolve(theSketch);
+
+
+        //extrude if not using custom part
+        if (!definition.customBodyBool)
+        {
+            if (definition.flip)
+            {
+                extrudeNormal = -extrudeNormal;
+            }
+            opExtrude(context, id + "extrude1", {
+                        "entities" : qSketchRegion(id + "sketch1"),
+                        "direction" : extrudeNormal,
+                        "endBound" : BoundingType.BLIND,
+                        "endDepth" : depth
+                    });
+        }
+
+        // if Slot Pattern and Cross Bracing wanted, then sketch it and remove from extrusions.
+        if (definition.bracing == true)
+        {
+            var braceSketch = newSketchOnPlane(context, id + "sketch2", {
+                    "sketchPlane" : skplane
+                });
+            var numBraces = definition.numBraces;
+            var braceIncrement = slotPatternDia / (numBraces);
+            for (var i = 0; i < numBraces; i += 1)
+            {
+                var xBrace = -(braceIncrement * (numBraces - 1) / 2) + braceIncrement * i;
+                skLineSegment(braceSketch, "braceLine" ~ toString(i), {
+                            "start" : vector(xBrace, slotPatternDia),
+                            "end" : vector(xBrace, -slotPatternDia)
+                        });
+            }
+
+            skSolve(braceSketch);
+            var braceLines = qCreatedBy(id + "sketch2", EntityType.EDGE);
+
+            opExtrude(context, id + "extrude2", {
+                        "entities" : braceLines,
+                        "direction" : normal,
+                        "endBound" : BoundingType.THROUGH_ALL,
+                        "startBound" : BoundingType.THROUGH_ALL
+                    });
+                    
+            var braceSrf = qCreatedBy(id + "extrude2", EntityType.BODY);
+                    
+            opThicken(context, id + "thicken1", {
+                    "entities" : braceSrf,
+                    "thickness1" : slotWidth/2,
+                    "thickness2" : slotWidth/2
+            });
+            
+            opBoolean(context, id + "boolean2", {
+                    "tools" : qCreatedBy(id + "thicken1", EntityType.BODY),
+                    "targets" : qCreatedBy(id + "extrude1", EntityType.BODY),
+                    "operationType" : BooleanOperationType.SUBTRACTION
+            });
+            opDeleteBodies(context, id + "deleteBraceSrf", {
+                    "entities" : qUnion([braceSrf, braceLines])
+            });
+            
+            var cutBraceEdges = qCreatedBy(id + "boolean2", EntityType.EDGE);
+
+// pasted kevins code 👇
+var verticalEdges = [];
+for (var edge in evaluateQuery(context, cutBraceEdges))
+{
+    const edgeDef = evCurveDefinition(context, {
+            "edge" : edge
+    });
+    if (edgeDef is Line && parallelVectors(edgeDef.direction, Z_DIRECTION))
+    {
+        verticalEdges = append(verticalEdges, edge);
+    }
+}
+const edgesToFillet = qUnion(verticalEdges);
+// pasted kevins code 👆
+
+opFillet(context, id + "fillet1", {
+        "entities" : edgesToFillet,
+        "radius" : slotWidth/2
+});
+
+
+            
+        }
+
+        // Draft
+        if (definition.flipDraft)
+        {
+            draftNormal = -draftNormal;
+        }
+        if (definition.addDraft)
+        {
+            var draftFaces = qNonCapEntity(id + "extrude1", EntityType.FACE);
+            opDraft(context, id + "draft1", {
+                        "draftType" : DraftType.NEUTRAL_PLANE,
+                        "neutralPlane" : neutralPlane,
+                        "draftFaces" : draftFaces,
+                        "pullVec" : draftNormal,
+                        "angle" : angle
+                    });
+        }
+
+
+        //cleanup
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : qUnion([neutralPlane, qCreatedBy(id + "sketch1")])
+                });
+
+        // select extruded body or custom body selection. if custom body, move it from its center to pattern center.
+        var body;
+        if (definition.customBodyBool)
+        {
+            body = definition.customBody;
+            
+            // // pick mate or sketch as part center
+            // var fromCsys;
+            // try silent
+            // {
+            //     fromCsys = planeToCSys(evOwnerSketchPlane(context, {
+            //             "entity" : definition.customBodyCenter
+            //     }));
+            // }
+            // try silent
+            // {
+            //     fromCsys = evMateConnector(context, {
+            //         "mateConnector" : definition.customBodyCenter
+            //     });
+            // }
+            // var partTransform = toWorld(center)*fromWorld(fromCsys);
+            
+            // opPattern(context, id + "pattern1", {
+            //         "entities" : body,
+            //         "transforms" : partTransform,
+            //         "instanceNames" : body~"transformed"
+            // });
+            // body = qCreatedBy(id + "pattern1", EntityType.BODY);
+            
+        }
+        else
+        {
+            body = qCreatedBy(id + "extrude1", EntityType.BODY);
+        }
+
+        //for loops
+        var axis = line(origin, normal);
+        var transforms = [];
+        var instanceNames = [];
+
+        // Radial transforms loop
+        if (definition.speakerPatternType == speakerPatternType.RADIAL)
+        {
+            for (var i = 1; i < rings; i += 1)
+            {
+                // add 6 every ring
+                var num = (i) * 6;
+
+                for (var j = 0; j < num; j += 1)
+                {
+                    transforms = append(transforms, rotationAround(axis, (360 / num) * j * degree) * transform(skplane.x * i * dist));
+                    instanceNames = append(instanceNames, toString(i) ~ "_" ~ toString(j));
+                }
+
+            }
+        }
+
+        // Fibonacci transforms loop
+        if (definition.speakerPatternType == speakerPatternType.FIBONACCI)
+        {
+            for (var i = 1; i < count; i += 1)
+            {
+                var dist = sqrt(i);
+                transforms = append(transforms, rotationAround(axis, goldenAngle * i) * transform(skplane.x * dist * scale));
+
+                instanceNames = append(instanceNames, "_" ~ toString(i));
+            }
+        }
+
+        opPattern(context, id + "pattern1", {
+                    "entities" : body,
+                    "transforms" : transforms,
+                    "instanceNames" : instanceNames
+                });
+        if (definition.speakerPatternType == speakerPatternType.FIBONACCI)
+        {
+            try silent
+            {
+            opDeleteBodies(context, id + "deleteBodies2", {
+                        "entities" : qCreatedBy(id + "extrude1", EntityType.BODY)
+                    });
+            }
+        }
+
+        // setting up for the boolean
+        var patternBodies = qCreatedBy(id + "pattern1", EntityType.BODY);
+        var seedBody = body;
+        var bodies = [patternBodies, seedBody];
+        bodies = qUnion(bodies);
+        var scope = definition.booleanScope;
+        var operationType = definition.operationType;
+        var boolType;
+
+        // defining rules for boolean type and executing the opBoolean
+        if (operationType != NewBodyOperationType.NEW)
+        {
+            if (operationType == NewBodyOperationType.ADD)
+            {
+                boolType = BooleanOperationType.UNION;
+                bodies = qUnion([scope, bodies]);
+            }
+            if (operationType == NewBodyOperationType.REMOVE)
+            {
+                boolType = BooleanOperationType.SUBTRACTION;
+            }
+            if (operationType == NewBodyOperationType.INTERSECT)
+            {
+                boolType = BooleanOperationType.SUBTRACT_COMPLEMENT;
+            }
+            opBoolean(context, id + "boolean1", {
+                        "tools" : bodies,
+                        "targets" : scope,
+                        "operationType" : boolType,
+                    });
+        }
+
+
+    });
