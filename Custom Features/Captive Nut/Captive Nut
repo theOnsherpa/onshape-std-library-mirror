@@ -1,0 +1,442 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1634;
+import(path : "onshape/std/geometry.fs", version : "1634.0");
+
+//Author: @Evan_Reese
+//Contributor: @armandoRR
+
+export import(path : "ba850300e7a3cb4d99631706", version : "f113e0fd6cd8922b70db6461");
+export import(path : "556c6fd454acffb7b3e64e1d", version : "0cd8b2822e5fa7f565413440");
+export import(path : "12312312345abcabcabcdeff/43e769b110edfc1ac4d27abc/779e4e2168dfbdd421cdf6ed", version : "f5fb0d6cd8568b6c025aa10b");
+
+// Icons
+icon::import(path : "230f0baf0526e148dbc5bf91", version : "c66f9e12e40f52ead604a740");
+
+nutC::import(path : "073a4cea114fde444f4d6c86", version : "24ee46d3c9491bee3905b092");
+
+nutT::import(path : "5526c2ea2e70507f7459f87e", version : "f4bf3e3c1ac52585af9b9db5");
+
+nutW::import(path : "f26525d8aa0a48f99e725a14", version : "5dcf9e8553a1315b70dab143");
+
+
+annotation { "Feature Type Name" : "Captive nut",
+        "Editing Logic Function" : "npEditLogic",
+        "Icon" : icon::BLOB_DATA }
+export const captiveNut = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+
+        annotation { "Name" : "Insertion direction", "UIHint" : "HORIZONTAL_ENUM", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE] }
+        definition.insertionType is insertionType;
+
+        annotation { "Group Name" : "Nut spec", "Collapsed By Default" : false }
+
+        {
+            annotation { "Name" : "Use nut spec variable", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            definition.useNutSpec is boolean;
+
+            if (definition.useNutSpec)
+            {
+                annotation { "Name" : "Name", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.nutSpecName is string;
+            }
+
+            else
+            {
+                nutSpecPredicate(definition);
+            }
+        }
+
+        annotation { "Group Name" : "Nut positions", "Collapsed By Default" : false }
+        {
+
+            annotation { "Name" : "Points to place pockets", "Filter" : EntityType.VERTEX && SketchObject.YES || BodyType.MATE_CONNECTOR }
+            definition.locations is Query;
+
+            // TODO Maybe add direction query to reference the angle from, but not for MVP.
+
+            annotation { "Name" : "Nut angle" }
+            isAngle(definition.nutAngle, ANGLE_360_ZERO_DEFAULT_BOUNDS);
+
+            annotation { "Name" : "Flip nut angle", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+            definition.flipAngle is boolean;
+
+            annotation { "Name" : "Offset depth" }
+            isLength(definition.offset, { (millimeter) : [-100000, 0, 100000], (inch) : 0 } as LengthBoundSpec);
+
+            annotation { "Name" : "Flip offset depth", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+            definition.flipDepth is boolean;
+
+        }
+
+        if (definition.insertionType == insertionType.Embedded)
+        {
+            annotation { "Group Name" : "Printer parameters", "Collapsed By Default" : true }
+            {
+                annotation { "Name" : "Printer Z-direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                definition.printerZ is Query;
+
+                annotation { "Name" : "Flip Z-direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.flipZ is boolean;
+
+                annotation { "Name" : "Nut support clearance" }
+                isLength(definition.supportClearance, { (millimeter) : [0, .3, 1] } as LengthBoundSpec);
+            }
+        }
+
+        if (definition.insertionType != insertionType.Embedded)
+        {
+            annotation { "Group Name" : "Pocket end bound", "Collapsed By Default" : false }
+            {
+
+                annotation { "Name" : "End bound" }
+                definition.endBound is BoundingType;
+
+                annotation { "Name" : "flip Extrude", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                definition.flipExtrude is boolean;
+
+                nutBoundParametersPredicate(definition);
+            }
+
+            // don't need chamfer for embedded type
+            annotation { "Name" : "Chamfer", "UIHint" : "DISPLAY_SHORT" }
+            definition.chamferBool is boolean;
+
+            if (definition.chamferBool)
+            {
+                annotation { "Name" : "Chamfer", "UIHint" : "DISPLAY_SHORT" }
+                isLength(definition.chamferSize, { (millimeter) : [0, .5, 100000], (inch) : .02 } as LengthBoundSpec);
+            }
+        }
+
+        annotation { "Name" : "Merge with all" }
+        definition.merge is boolean;
+
+        if (!definition.merge)
+        {
+            annotation { "Name" : "Merge scope", "Filter" : EntityType.BODY && BodyType.SOLID }
+            definition.mergeScope is Query;
+        }
+
+        annotation { "Name" : "Display nut", "Default" : true }
+        definition.displayNut is boolean;
+    }
+
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        // Getting values from the nut size lookup table
+        const tableItem = getLookupTable(nutPocketTable, definition.connectorStandard); /* get the table selection (map)*/
+        const custom = tableItem == {}; /*asking "is it set to custom?" (boolean)*/
+
+        //insertion type booleans for easier typing and reading later
+        const isPocketType = definition.insertionType == insertionType.Pocket;
+        const isSlotType = definition.insertionType == insertionType.Slot;
+        const isEmbeddedType = definition.insertionType == insertionType.Embedded;
+
+        //setting nut pocket values either by the lookup table or nut spec variable
+        var clearance;
+        var nutWidth;
+        var nutThickness;
+        var shape;
+
+        if (definition.useNutSpec)
+        {
+            // pocket dimensions from nut spec variable
+            try
+            {
+                var nutSpec = getVariable(context, "@NutSpec" ~ definition.nutSpecName);
+                nutWidth = nutSpec.nutW;
+                nutThickness = nutSpec.nutT;
+                clearance = nutSpec.nutC;
+                shape = nutSpec.shape;
+            }
+            catch (error)
+            {
+                throw regenError("No nut spec variable matching \"" ~ definition.nutSpecName ~ "\" found. Set one using the Nut Spec Variable feature.");
+            }
+
+        }
+        else
+        {
+            //pocket dimensions from UI
+            nutWidth = definition.nutW;
+            nutThickness = definition.nutT;
+            clearance = definition.nutC;
+            shape = definition.connectorStandard.shape;
+        }
+
+        // other values from UI
+        var additionalWidth = clearance * 2; /* 2x for each side of nut */
+        var additionalThickness = clearance * 2; /* 2x for each side of nut */
+        var supportClearance = -definition.supportClearance;
+        var offset = definition.flipDepth ? -definition.offset : definition.offset;
+
+        // merge scope: merge all or not?
+        const mergeScope = definition.merge ? qBodyType(qEverything(EntityType.BODY), BodyType.SOLID) : definition.mergeScope;
+
+        // defining the end bound entity of the pocket
+        var endBoundEntity;
+        if (definition.endBound == BoundingType.UP_TO_SURFACE)
+        {
+            endBoundEntity = definition.endBoundEntityFace;
+        }
+        if (definition.endBound == BoundingType.UP_TO_BODY)
+        {
+            endBoundEntity = definition.endBoundEntityBody;
+        }
+        if (definition.endBound == BoundingType.UP_TO_VERTEX)
+        {
+            endBoundEntity = definition.endBoundEntityVertex;
+        }
+
+        // add clearances
+        var pocketWidth = nutWidth + additionalWidth;
+        var pocketThickness = nutThickness + additionalThickness;
+
+        // defining the nut rotation behavior
+        var nutAngle = !definition.flipAngle ? definition.nutAngle : -definition.nutAngle;
+
+        // Creates a map for the nut itself and the nut pocket, each containing the corner location and number of sides. i.e. {"corner" : vertex(0,1,0), "sides" : 6}
+        var nut = getNutCorner(nutWidth, shape); /*for displaying the nut body*/
+        var pocket = getNutCorner(pocketWidth, shape);
+
+        // find and display printer z direction for embedded nut. This also sets the variable for the Z direction.
+        var printerZ = isEmbeddedType ? getPrinterZDirection(context, definition) : zeroVector(3);
+
+        // initial loop just displays nuts to make sure they always show, even if something else fails downstream.
+        forEachEntity(context, id + "displayNuts", definition.locations, function(location is Query, id is Id)
+            {
+                // creates a plane for each nut
+                var nutPlane = getNutPlane(context, location, nutThickness, offset, nutAngle);
+
+                // Adding a nut to display
+                if (definition.displayNut)
+                {
+                    displayNut(context, id, nutPlane, nut, nutThickness);
+                }
+            });
+
+        // box to change if there's an error
+        var errorBox = new box("");
+
+        // loop to create the pockets
+        forEachEntity(context, id + "createNutPockets", definition.locations, function(location is Query, id is Id)
+            {
+                // creates a plane for each nut
+                var nutPlane = getNutPlane(context, location, nutThickness, offset, nutAngle);
+
+                // Adding a body for the pocket that's a bit bigger than the nut
+                var pocketSketch = newSketchOnPlane(context, id + "pocketSketch", {
+                        "sketchPlane" : nutPlane
+                    });
+
+                skRegularPolygon(pocketSketch, "pocket", {
+                            "center" : vector(0, 0) * inch,
+                            "firstVertex" : pocket.corner,
+                            "sides" : pocket.sides
+                        });
+
+                skSolve(pocketSketch);
+
+                // a nut shape that's bigger than the nut by the clearance (not a whole pocket yet)
+                opExtrude(context, id + "pocketBodyExtrude", {
+                            "entities" : qSketchRegion(id + "pocketSketch"),
+                            "direction" : nutPlane.normal,
+                            "endBound" : BoundingType.BLIND,
+                            "endDepth" : nutThickness + definition.nutC,
+                            "startBound" : BoundingType.BLIND,
+                            "startDepth" : definition.nutC
+                        });
+
+                // choose a pocket direction based on the nut insertion method
+                var pocketDirection = getPocketDirection(definition, nutPlane, printerZ);
+
+                // check the nut body face angles relative to the pocket direction to select the ones we want to extrude
+                var nutBody = qCreatedBy(id + "pocketBodyExtrude", EntityType.BODY);
+                var nutBodyFaces = evaluateQuery(context, qOwnedByBody(nutBody, EntityType.FACE));
+                var pocketExtrudeFaces = [];
+                for (var face in nutBodyFaces)
+                {
+                    var angle = angleBetween(evFaceTangentPlane(context, {
+                                    "face" : face,
+                                    "parameter" : vector(0.5, 0.5)
+                                }).normal, pocketDirection);
+
+                    if (angle < (PI / 2 - .0001) * radian)
+                    {
+                        pocketExtrudeFaces = append(pocketExtrudeFaces, face);
+                    }
+                }
+                pocketExtrudeFaces = qUnion(pocketExtrudeFaces);
+
+                // if isEmbeddedType then get a vertex to stop the embedded pocket extrude at.
+                var thisEndBoundEntity = endBoundEntity;
+                var thisEndBoundType = definition.endBound;
+                var embeddedBoundPlane = qNothing();
+                if (isEmbeddedType)
+                {
+                    // making a plane to terminate the extrude. It's offset 1mm from the farthest point on the nut.
+                    var origin = evVertexPoint(context, {
+                                "vertex" : evaluateQuery(context, qOwnedByBody(nutBody, EntityType.VERTEX)->qFarthestAlong(printerZ))[0]
+                            }) + 1 * millimeter * pocketDirection;
+
+                    opPlane(context, id + "endBoundPlane", {
+                                "plane" : plane(origin, printerZ)
+                            });
+
+                    embeddedBoundPlane = qCreatedBy(id + "endBoundPlane", EntityType.FACE);
+                    thisEndBoundEntity = embeddedBoundPlane;
+                    thisEndBoundType = BoundingType.UP_TO_SURFACE;
+                }
+
+                var offsetDistance = definition.hasOffset && !isEmbeddedType ? -definition.offsetDistance : 0 * inch;
+                if (definition.offsetOppositeDirection)
+                    offsetDistance *= -1;
+
+                // setting the depth either by an absolute value (BLIND) or by a measurement (UP_TO_VERTEX)
+                var pocketDepth;
+                if (thisEndBoundType == BoundingType.BLIND)
+                {
+                    pocketDepth = definition.depth;
+                }
+                else if (thisEndBoundType == BoundingType.UP_TO_VERTEX)
+                {
+                    var origin = evVertexPoint(context, {
+                            "vertex" : definition.endBoundEntityVertex
+                        });
+                    if (definition.hasOffset)
+                    {
+                        origin -= definition.offsetDistance * pocketDirection;
+                        offsetDistance = 0 * inch;
+                    }
+
+                    opPlane(context, id + "endBoundVertexPlane", {
+                                "plane" : plane(origin, pocketDirection)
+                            });
+
+                    embeddedBoundPlane = qCreatedBy(id + "endBoundVertexPlane", EntityType.FACE);
+                    thisEndBoundEntity = embeddedBoundPlane;
+                    thisEndBoundType = BoundingType.UP_TO_SURFACE;
+                }
+
+                
+                // determine if support piece is needed
+                // [embedded AND (normal OR negative normal)] is the only one that doesn't need nut support
+                // non-embedded (pocket and slot) need the nut support temporarily for boolean subtraction
+                const embeddedAndNormalToPrintDirection = 
+                    isEmbeddedType
+                    && (tolerantEquals(nutPlane.normal, pocketDirection)
+                    || tolerantEquals(nutPlane.normal, -pocketDirection));
+                
+                const createNutSupport = !embeddedAndNormalToPrintDirection;
+
+                var pocketBodies;
+                if (createNutSupport)
+                {
+                    // extrude nut pocket faces
+                    opExtrude(context, id + "pocketExtrude", {
+                                "entities" : pocketExtrudeFaces,
+                                "direction" : pocketDirection,
+                                "endBound" : thisEndBoundType,
+                                "endBoundEntity" : thisEndBoundEntity,
+                                "endTranslationalOffset" : offsetDistance,
+                                "endDepth" : pocketDepth,
+                                "isStartBoundOpposite" : false
+                            });
+                    pocketBodies = qCreatedBy(id + "pocketExtrude", EntityType.BODY);
+                }
+                else
+                {
+                    pocketBodies = qNothing();
+                }
+
+
+                var subtractionBodies = qUnion([nutBody, qCreatedBy(id + "pocketExtrude", EntityType.BODY)]);
+
+                opBoolean(context, id + "pocketSubtraction", {
+                            "tools" : subtractionBodies,
+                            "targets" : mergeScope,
+                            "operationType" : BooleanOperationType.SUBTRACTION,
+                            "keepTools" : true
+                        });
+
+                // Cleanup
+                var notEmbeddedPocketBodies = isEmbeddedType ? qNothing() : pocketBodies;
+                var cleanupQuery = qUnion([qCreatedBy(id + "pocketSketch"), nutBody, notEmbeddedPocketBodies, embeddedBoundPlane]);
+                opDeleteBodies(context, id + "cleanup", {
+                            "entities" : cleanupQuery
+                        });
+
+                // if it's Embedded mode and there are multiple pocket bodies, merge embedded pocket bodies to create the nut support.
+                if (isEmbeddedType)
+                {
+                    if (evaluateQuery(context, pocketBodies)->size() > 1)
+                    {
+                        opBoolean(context, id + "supportBoolean", {
+                                    "tools" : pocketBodies,
+                                    "operationType" : BooleanOperationType.UNION
+                                });
+                    }
+
+                    // finds support body faces adjacent to the nut. Of that list, finds faces at too sharp an angle to 3D print well and deletes them.
+                    // const sliverDeletionAngle = 15 * degree;
+                    var pocketFaces = qCreatedBy(id + "pocketExtrude", EntityType.FACE);
+                    var nutFaces = getAdjacentNutFacesAndDeleteSliverFaces(context, id, pocketFaces, pocketDirection);
+
+                    if (createNutSupport)
+                    {
+                        // the faces not adjacent to the nut
+                        var nonNutFaces = qSubtraction(pocketFaces, nutFaces);
+
+                        // adding clearance to only support faces not adjacent to the nut, since those already have the nut clearance (nutC) added.
+                        moveFaceFeatureByOffset(context, id, nonNutFaces, definition.supportClearance);
+
+                        // naming the support body
+                        setProperty(context, {
+                                    "entities" : qCreatedBy(id + "pocketExtrude", EntityType.BODY),
+                                    "propertyType" : PropertyType.NAME,
+                                    "value" : "Nut print support"
+                                });
+                    }
+                }
+
+                // Chamfer pocket edges
+                if (definition.chamferBool && !isEmbeddedType)
+                {
+                    var pocketEdges = evaluateQuery(context, qUnion([qCreatedBy(id + "pocketSubtraction", EntityType.EDGE), nutBody, pocketBodies]));
+                    var convexPocketEdges = [];
+                    for (var edge in pocketEdges)
+                    {
+                        convexPocketEdges = evEdgeConvexity(context, { "edge" : edge }) == EdgeConvexityType.CONVEX ? append(convexPocketEdges, edge) : convexPocketEdges;
+                    }
+                    convexPocketEdges = qUnion(convexPocketEdges);
+
+                    try
+                    {
+                        opChamfer(context, id + "pocketChamfer", {
+                                    "entities" : convexPocketEdges,
+                                    "chamferType" : ChamferType.EQUAL_OFFSETS,
+                                    "width" : definition.chamferSize
+                                });
+                    }
+                    catch (error)
+                    {
+                        errorBox[] = "true";
+                        addDebugEntities(context, convexPocketEdges, DebugColor.RED);
+                    }
+                }
+
+            });
+
+        if (errorBox[] == "true")
+        {
+            reportFeatureWarning(context, id, "Highlighted edges failed to chamfer.");
+        }
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+    });
