@@ -1,0 +1,277 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1378;
+import(path : "onshape/std/geometry.fs", version : "1378.0");
+import(path : "9f4c9835d8018ff7dbdb5683/de147d313b9f9c5756c9c0b3/ca9ce290d871d9e13f1ce752", version : "6a06ef20f492a5a2dd29c541");
+export import(path : "4e3fd89c48e83b14f6f1befe", version : "3b073b5f113e5fa45240076d");
+icon::import(path : "9bbac78f7bb5eb7ee09608cc", version : "fc5a3990d513ae4a09f959bc");
+
+const COLOR_VALUE_BOUNDS = {
+            (unitless) : [0, 255, 255]
+        } as IntegerBoundSpec;
+export const HUE_BOUNDS = { (unitless) : [0, 0, 360] } as IntegerBoundSpec;
+export const SATURATION_VALUE_BOUNDS = { (unitless) : [0, 0.75, 1] } as RealBoundSpec;
+
+export enum ColorMode
+{
+    Palettes,
+    HSL,
+    RGB,
+    Hexadecimal
+}
+
+annotation { "Feature Type Name" : "Part Color", "Icon" : icon::BLOB_DATA }
+export const colorPart = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Parts", "Filter" : EntityType.BODY }
+        definition.parts is Query;
+
+        annotation { "Name" : "Invert part selection" }
+        definition.invertParts is boolean;
+
+        annotation { "Name" : "Faces", "Filter" : EntityType.FACE }
+        definition.faces is Query;
+
+        annotation { "Name" : "Features" }
+        definition.features is FeatureList;
+
+        annotation { "Name" : "Color mode", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.colorMode is ColorMode;
+
+        if (definition.colorMode == ColorMode.Palettes)
+        {
+            annotation { "Name" : "Pallette", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            definition.pallette is ColorPreset;
+
+            if (definition.pallette == ColorPreset.Basic)
+            {
+                annotation { "Name" : "Color", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.basicColor is basicColor;
+
+                annotation { "Name" : "basicOptions", "UIHint" : [UIHint.HORIZONTAL_ENUM, UIHint.REMEMBER_PREVIOUS_VALUE] }
+                definition.basicOption is basicOption;
+            }
+
+            if (definition.pallette == ColorPreset.Grey)
+            {
+                annotation { "Name" : "Color", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.greyColor is greyColor;
+
+                annotation { "Name" : "greyOptions", "UIHint" : [UIHint.HORIZONTAL_ENUM, UIHint.REMEMBER_PREVIOUS_VALUE] }
+                definition.greyOption is greyOption;
+            }
+
+            if (definition.pallette == ColorPreset.Wood)
+            {
+                annotation { "Name" : "Color", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.woodColor is woodColor;
+
+            }
+            if (definition.pallette == ColorPreset.Metal)
+            {
+                annotation { "Name" : "Color", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                definition.metalColor is metalColor;
+            }
+
+        }
+
+        if (definition.colorMode == ColorMode.RGB)
+        {
+            annotation { "Name" : "Red", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.red, COLOR_VALUE_BOUNDS);
+
+            annotation { "Name" : "Green", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.green, COLOR_VALUE_BOUNDS);
+
+            annotation { "Name" : "Blue", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.blue, COLOR_VALUE_BOUNDS);
+        }
+        if (definition.colorMode == ColorMode.HSL)
+        {
+            annotation { "Name" : "Hue", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.hue, HUE_BOUNDS);
+
+            annotation { "Name" : "Saturation", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isReal(definition.saturation, SATURATION_VALUE_BOUNDS);
+
+            annotation { "Name" : "Luminance", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isReal(definition.luminance, SATURATION_VALUE_BOUNDS);
+        }
+        if (definition.colorMode == ColorMode.Hexadecimal)
+        {
+            annotation { "Name" : "#", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            definition.hexCode is string;
+        }
+
+        annotation { "Name" : "Alpha" }
+        isReal(definition.alpha, { (unitless) : [0, 1, 1] } as RealBoundSpec);
+    }
+    {
+        var featureFaces = qCreatedBy(definition.features, EntityType.FACE);
+        var parts = definition.invertParts ? qSubtraction(qUnion([qCompositePartTypeFilter(qEverything(EntityType.BODY), CompositePartType.CLOSED), qAllModifiableSolidBodies()]), definition.parts) : definition.parts;
+        var entities = qUnion([parts, definition.faces, featureFaces]);
+        var red;
+        var green;
+        var blue;
+        var theColor;
+        var alpha = definition.alpha;
+
+        if (definition.colorMode == ColorMode.Palettes)
+        {
+            var key;
+            if (definition.pallette == ColorPreset.Basic)
+            {
+
+                var option = definition.basicOption;
+                // Why doesn't this nested ternary work?
+                // var shade = option == basicOption.Neutral ? "" : option == basicOption.Dark ? "dark" : option == basicOption.Light ? "light" : "HL";
+
+                var shade;
+                if (option == basicOption.Dark)
+                    shade = "dark";
+                else if (option == basicOption.Neutral)
+                    shade = "";
+                else if (option == basicOption.Light)
+                    shade = "light";
+                else if (option == basicOption.Highlighter)
+                    shade = "HL";
+                key = shade ~ toString(definition.basicColor);
+            }
+
+            else if (definition.pallette == ColorPreset.Grey)
+            {
+                var option = definition.greyOption;
+                if (definition.greyColor == greyColor.Black)
+                {
+                    key = "Black";
+                }
+
+                else if (definition.greyColor == greyColor.White)
+                {
+                    key = "White";
+                }
+
+                else
+                {
+                    var g = definition.greyColor;
+                    var percent;
+                    if (g == greyColor.Ten)
+                        percent = "10";
+                    else if (g == greyColor.Twenty)
+                        percent = "20";
+                    else if (g == greyColor.Thirty)
+                        percent = "30";
+                    else if (g == greyColor.Fourty)
+                        percent = "40";
+                    else if (g == greyColor.Fourty)
+                        percent = "40";
+                    else if (g == greyColor.Fifty)
+                        percent = "50";
+                    else if (g == greyColor.Sixty)
+                        percent = "60";
+                    else if (g == greyColor.Seventy)
+                        percent = "70";
+                    else if (g == greyColor.Eighty)
+                        percent = "80";
+                    else if (g == greyColor.Ninty)
+                        percent = "90";
+
+                    var shade;
+                    if (option == greyOption.Cool)
+                    {
+                        shade = "CG";
+                    }
+                    else if (option == greyOption.Neutral)
+                    {
+                        shade = "NG";
+                    }
+                    else if (option == greyOption.Warm)
+                    {
+                        shade = "WG";
+                    }
+                    key = shade ~ percent;
+                }
+            }
+
+            else if (definition.pallette == ColorPreset.Wood)
+            {
+                key = toString(definition.woodColor);
+            }
+            else if (definition.pallette == ColorPreset.Metal)
+            {
+                key = toString(definition.metalColor);
+            }
+
+            theColor = hexToColor(colorPresetHexCode[key]);
+            theColor.alpha = definition.alpha;
+        }
+        else if (definition.colorMode == ColorMode.RGB)
+        {
+            red = 1 / 255 * definition.red;
+            green = 1 / 255 * definition.green;
+            blue = 1 / 255 * definition.blue;
+            theColor = color(red, green, blue, alpha);
+        }
+        else if (definition.colorMode == ColorMode.HSL)
+        {
+            // Algorithm from https://cs.stackexchange.com/questions/64549/convert-hsv-to-rgb-colors
+            var h is number = definition.hue / 60;
+            if (definition.hue >= 300)
+                h = (definition.hue - 300) / 60;
+
+            const max is number = definition.luminance;
+            const chroma is number = definition.saturation * definition.luminance;
+            const min is number = max - chroma;
+
+            if (h < 0)
+            {
+                red = max;
+                green = min;
+                blue = min - h * chroma;
+            }
+            else if (h < 1)
+            {
+                red = max;
+                green = min + h * chroma;
+                blue = min;
+            }
+            else if (h < 2)
+            {
+                red = min - (h - 2) * chroma;
+                green = max;
+                blue = min;
+            }
+            else if (h < 3)
+            {
+                red = min;
+                green = max;
+                blue = min + (h - 2) * chroma;
+            }
+            else if (h < 4)
+            {
+                red = min;
+                green = min - (h - 4) * chroma;
+                blue = max;
+            }
+            else if (h < 5)
+            {
+                red = min + (h - 4) * chroma;
+                green = min;
+                blue = max;
+            }
+            theColor = color(red, green, blue, alpha);
+        }
+        else if (definition.colorMode == ColorMode.Hexadecimal)
+        {
+            theColor = hexToColor(definition.hexCode, alpha);
+        }
+
+        setProperty(context, {
+                    "entities" : entities,
+                    "propertyType" : PropertyType.APPEARANCE,
+                    "value" : theColor,
+                    "allowFaces" : true
+                });
+    });
