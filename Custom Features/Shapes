@@ -1,0 +1,535 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1821;
+import(path : "onshape/std/geometry.fs", version : "1821.0");
+
+export enum PolygonShapeType
+{
+    Polygon,
+    Star,
+    Scalloped,
+    Waves,
+}
+
+export enum PolygonModeType
+{
+    Count,
+    annotation { "Name" : "Vertex spacing" }
+    Spacing
+}
+
+export enum PriorityModeType
+{
+    Spacing,
+    Diameter
+}
+
+export const maxArrowCount = 100;
+
+annotation { "Feature Type Name" : "Shapes",
+        "Manipulator Change Function" : "shapeManipulatorChange",
+        "Editing Logic Function" : "shapeEditingLogicFunction" }
+export const shapes = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Polygon Mode Type", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.mode is PolygonModeType;
+
+        // temporarly here to troubleshoot
+        // annotation { "Name" : "My Count" }
+        // isInteger(definition.myCount, { (unitless) : [0, 0, 100] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Location", "Filter" : QueryFilterCompound.ALLOWS_PLANE, "MaxNumberOfPicks" : 1 }
+        definition.location is Query;
+
+        annotation { "Name" : "Shape", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.SHOW_LABEL] }
+        definition.shape is PolygonShapeType;
+
+        if (definition.mode == PolygonModeType.Count)
+        {
+            annotation { "Name" : "Points", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.count, { (unitless) : [3, 6, 1e6] } as IntegerBoundSpec);
+        }
+
+
+        if (definition.mode == PolygonModeType.Spacing)
+        {
+            annotation { "Name" : "Points", "UIHint" : UIHint.READ_ONLY }
+            isInteger(definition.actualCount, { (unitless) : [3, 6, 1e6] } as IntegerBoundSpec);
+
+            annotation { "Name" : "Dimension Priority", "UIHint" : UIHint.SHOW_LABEL }
+            definition.priorityType is PriorityModeType;
+        }
+
+        annotation { "Name" : "Diameter", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        isLength(definition.diameter, NONNEGATIVE_LENGTH_BOUNDS);
+
+        if (definition.mode == PolygonModeType.Spacing)
+        {
+            if (definition.priorityType == PriorityModeType.Spacing)
+            {
+                annotation { "Name" : "Actual diameter", "UIHint" : UIHint.READ_ONLY }
+                isLength(definition.actualDia, NONNEGATIVE_LENGTH_BOUNDS);
+            }
+
+            annotation { "Name" : "Point spacing" }
+            isLength(definition.spacing, LENGTH_BOUNDS);
+
+            if (definition.priorityType == PriorityModeType.Diameter)
+            {
+                annotation { "Name" : "Actual spacing", "UIHint" : UIHint.READ_ONLY }
+                isLength(definition.actualSpacing, NONNEGATIVE_LENGTH_BOUNDS);
+            }
+        }
+
+        // may want for smoother linked dimensions with manips
+        // annotation { "Name" : "manip changed dia1" } //, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        // definition.dia1Edit is boolean;
+
+
+        if (definition.shape == PolygonShapeType.Star || definition.shape == PolygonShapeType.Scalloped || definition.shape == PolygonShapeType.Waves)
+        {
+            annotation { "Name" : "Proportions are locked", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            definition.proportionsAreLocked is boolean;
+
+            if (definition.proportionsAreLocked)
+            {
+                annotation { "Name" : "Offset from circle", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.READ_ONLY] }
+                isLength(definition.offsetDisplay, LENGTH_BOUNDS);
+            }
+
+            if (!definition.proportionsAreLocked)
+            {
+                annotation { "Name" : "Offset from circle", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                isLength(definition.offset, LENGTH_BOUNDS);
+
+            }
+
+            // may want for smoother linked dimensions with manips
+            // annotation { "Name" : "manip changed dia2" } //, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            // definition.offsetEdit is boolean;
+
+            annotation { "Name" : "Lock proportions" }
+            definition.link is boolean;
+        }
+
+        annotation { "Name" : "Direction of first vertex (optional)", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+        definition.direction is Query;
+
+        annotation { "Name" : "Flip direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+        definition.flipDirection is boolean;
+
+        annotation { "Name" : "Show points", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.showPoints is boolean;
+
+    }
+    {
+
+        // set up for feature patterns
+        var remainingTransform = getRemainderPatternTransform(context, {
+                "references" : definition.location
+            });
+
+        // set up for easier typing and editing later
+        const shape = { "polygon" : definition.shape == PolygonShapeType.Polygon, "star" : definition.shape == PolygonShapeType.Star, "scalloped" : definition.shape == PolygonShapeType.Scalloped, "waves" : definition.shape == PolygonShapeType.Waves };
+
+
+        // set up shape size info
+        const shapeInfo = getShapeInfo(definition);
+
+        // let the user know if the count manipulator is maxed out
+        const countCheck = definition.mode == PolygonModeType.Count ? definition.count : shapeInfo.count;
+        if (countCheck >= maxArrowCount)
+            reportFeatureInfo(context, id, "Arrow limit reached. More points can be added by changing numbers manually.");
+
+        const count = shapeInfo.count;
+        const angle = shapeInfo.angle;
+        const diameter = shapeInfo.diameter;
+
+
+        var skPlane = isQueryEmpty(context, definition.location) ? XY_PLANE : evPlane(context, { "face" : definition.location });
+        var direction = isQueryEmpty(context, definition.direction) ? skPlane.x : extractDirection(context, definition.direction);
+        if (definition.flipDirection)
+            direction = -direction;
+
+        skPlane.x = direction;
+
+        // find the main points
+        var startVector = vector(diameter / 2, 0 * inch);
+        var points = vectorPattern2D(startVector, count, true);
+
+        // direction preview line
+        if (definition.showPoints)
+        {
+            addDebugArrow(context, skPlane.origin, planeToWorld(skPlane, startVector), 0 * centimeter, DebugColor.BLUE);
+            for (var point in points)
+            {
+                addDebugPoint(context, planeToWorld(skPlane, point), DebugColor.BLUE);
+            }
+        }
+
+        // add the main arrow
+        var linearManip1 = linearManipulator({
+                "base" : skPlane.origin,
+                "direction" : skPlane.x,
+                "offset" : diameter / 2,
+                "minValue" : 0 * inch,
+                "primaryParameterId" : "dia"
+            });
+        addManipulators(context, id, { "linearManip1" : linearManip1 });
+
+
+        if (shape.star || shape.scalloped || shape.waves)
+        {
+            var dia2 = diameter + definition.offset * 2;
+
+            // finding a point on a line between two main points
+            var halfAngle = angle / 2;
+            var midVector = rotate2DVector(vector(dia2 / 2, 0 * inch), halfAngle);
+            var secondaryPoints = vectorPattern2D(midVector, count, false);
+
+            // direction preview line
+            if (definition.showPoints)
+            {
+                addDebugArrow(context, skPlane.origin, planeToWorld(skPlane, midVector), 0 * centimeter, DebugColor.CYAN);
+                for (var point in secondaryPoints)
+                {
+                    addDebugPoint(context, planeToWorld(skPlane, point), DebugColor.CYAN);
+                }
+            }
+
+
+            if (!definition.link)
+            {
+                // adding the second arrow manip
+                var secondArrowBase = planeToWorld(skPlane, rotate2DVector(points[0], halfAngle));
+                var secondArrowRotation = rotationAround(line(skPlane.origin, skPlane.normal), angle / 2);
+                var secondArrowDirection = normalize(secondArrowRotation * (skPlane.x * inch));
+
+                var linearManip2 = linearManipulator({
+                        "base" : secondArrowBase,
+                        "direction" : secondArrowDirection,
+                        "offset" : definition.offset,
+                        "style" : ManipulatorStyleEnum.SECONDARY,
+                        "primaryParameterId" : "offset",
+                    });
+
+                addManipulators(context, id, { "linearManip2" : linearManip2 });
+            }
+
+            // making a single list of points
+            points = weaveArrays(points, secondaryPoints);
+        }
+
+        // adding a count manipulator
+        var countManip = angularManipulator({
+                "axisOrigin" : skPlane.origin,
+                "axisDirection" : skPlane.normal,
+                "rotationOrigin" : planeToWorld(skPlane, startVector),
+                "angle" : angle,
+                "minValue" : 1e-5 * degree,
+                "maxValue" : 120 * degree,
+                "primaryParameterId" : "count"
+            });
+
+        addManipulators(context, id, { "countManip" : countManip });
+
+
+        // sketching the shapes
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", {
+                "sketchPlane" : skPlane
+            });
+
+        if (shape.polygon || shape.star)
+        {
+            skPolyline(sketch1, "polyline1", {
+                        "points" : points
+                    });
+        }
+
+        if (shape.scalloped)
+        {
+            for (var i = 0; i < size(points) - 2; i += 2)
+            {
+                skArc(sketch1, "arc" ~ i, {
+                            "start" : points[i],
+                            "mid" : points[i + 1],
+                            "end" : points[i + 2]
+                        });
+            }
+        }
+
+        if (shape.waves)
+        {
+            skFitSpline(sketch1, "spline1", {
+                        "points" : points
+                    });
+        }
+
+        skSolve(sketch1);
+
+        var sketchFaces = qSketchRegion(id + "sketch1");
+        var centerFace = qContainsPoint(sketchFaces, skPlane.origin);
+        sketchFaces = qSubtraction(sketchFaces, centerFace);
+
+        // assign an id to the center face to stabilize different conditions
+        opNameEntity(context, id + "sketchFaceName", { "entity" : centerFace, "entityName" : "sketchFace " ~ toIdentity(id) });
+        centerFace = qNamed("sketchFace " ~ toIdentity(id));
+
+        // pulling out the center face, changing its id, and adding it at the beginning means it drives the id for the opExtractSurface making it stable
+        sketchFaces = qUnion([centerFace, sketchFaces]);
+
+        // making a face instead of using the sketch because it forms a single face and can have it's identity assigned for stability
+        opExtractSurface(context, id + "extractSurface", { "faces" : sketchFaces, "redundancyType" : ExtractSurfaceRedundancyType.REMOVE_ALL_REDUNDANCY });
+
+        // sets the internal ID of the face so changing between shapes doesn't break downstream features
+        var shapeFace = qCreatedBy(id + "extractSurface", EntityType.FACE);
+        var shapeBody = qCreatedBy(id + "extractSurface", EntityType.BODY);
+
+        // with scalloped (and maybe future modes), you can end up with lots of faces sometimes and I'm only stabilizing the id of the center one to prevent duplicate ids.
+        shapeFace = qContainsPoint(shapeFace, skPlane.origin);
+
+        // setting the id of the face created
+        opNameEntity(context, id + "faceName", { "entity" : shapeFace, "entityName" : "face " ~ toIdentity(id) });
+
+        // setting the id of the surface body created
+        opNameEntity(context, id + "surfaceName", { "entity" : shapeBody, "entityName" : "surface " ~ toIdentity(id) });
+
+        // cleaning up sketch entities
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : qCreatedBy(id + "sketch1")
+                });
+
+        // setting the color of the output surface so it's transparent and always the same color. Hopefully it feels more like a construction object
+        setProperty(context, {
+                    "entities" : shapeBody,
+                    "propertyType" : PropertyType.APPEARANCE,
+                    "value" : color(.77, .81, .86, .34) // pretty darn close to a sketch face!
+                });
+
+        // setting up for feature patterns
+        transformResultIfNecessary(context, id, remainingTransform);
+
+    });
+
+export function rotate2DVector(baseVector is Vector, angle is ValueWithUnits) returns Vector
+{
+    return vector(baseVector[0] * cos(angle) - baseVector[1] * sin(angle), baseVector[0] * sin(angle) + baseVector[1] * cos(angle));
+}
+
+export function vectorPattern2D(startVector is Vector, count is number, closed is boolean) returns array
+{
+    var vectorArray = [startVector];
+    for (var i = 1; i < count; i += 1)
+    {
+        vectorArray = append(vectorArray, rotate2DVector(vectorArray[0], 360 / count * degree * i));
+    }
+    if (closed)
+    {
+        vectorArray = append(vectorArray, vectorArray[0]);
+    }
+
+    return vectorArray;
+}
+
+export function weaveArrays(array1 is array, array2 is array) returns array
+{
+    var count = max(size(array1), size(array2));
+
+    var newArray = [];
+    for (var i = 0; i < count; i += 1)
+    {
+        if (i < size(array1))
+            newArray = append(newArray, array1[i]);
+
+        if (i < size(array2))
+            newArray = append(newArray, array2[i]);
+    }
+
+    return newArray;
+}
+
+export function shapeManipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+    if (newManipulators["linearManip1"] is map)
+    {
+        definition.diameter = newManipulators["linearManip1"].offset * 2;
+        // definition.dia1Edit = true; // may want for smoother linked dimensions with manips
+    }
+    // else
+    // {
+    //     definition.dia1Edit = false;
+    // }
+
+    if (newManipulators["linearManip2"] is map)
+    {
+        definition.offset = newManipulators["linearManip2"].offset;
+        // definition.offsetEdit = true; // may want for smoother linked dimensions with manips
+    }
+    // else
+    // {
+    //     definition.offsetEdit = false;
+    // }
+
+    if (newManipulators["countManip"] is map)
+    {
+
+        // println("MANIP TOP " ~ roundToPrecision(definition.diameter/millimeter, 3));
+        var newAngle = newManipulators["countManip"].angle;
+        if (definition.mode == PolygonModeType.Count)
+        {
+            // adding a max count to keep users from dragging the manipulator to infinity. Numbers can still be increased by typing them in.
+            definition.count = min(maxArrowCount, round(360 * degree / newAngle));
+
+            // println("MANIP BOTTOM " ~ roundToPrecision(definition.diameter/millimeter, 3));
+            return definition;
+        }
+
+        else if (definition.mode != PolygonModeType.Count)
+        {
+            const shapeInfo = getShapeInfo(definition);
+
+            // adding a max to keep users from dragging the manipulator to infinity. Numbers can still be increased by typing them in.
+            newAngle = max(newAngle, 360 * degree / maxArrowCount);
+            definition.spacing = 2 * (shapeInfo.diameter / 2 * cos(90 * degree - newAngle / 2));
+
+            return definition;
+        }
+
+    }
+    return definition;
+}
+
+export function shapeEditingLogicFunction(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    const oldShapeInfo = getShapeInfo(oldDefinition);
+    // println(oldShapeInfo);
+
+    const shapeInfo = getShapeInfo(definition);
+    // println(shapeInfo);
+
+    // println("EL TOP " ~ roundToPrecision(definition.diameter/millimeter, 3));
+    
+    if (definition.link && !oldDefinition.link)
+    definition.offsetDisplay = definition.offset;
+
+    if (definition.link)
+    {
+        definition.proportionsAreLocked = true;
+        if (oldDefinition.diameter != definition.diameter)
+        {
+            definition.offset = definition.diameter * oldDefinition.offset / oldDefinition.diameter;
+            definition.offsetDisplay = definition.offset;
+            return definition;
+        }
+
+        if (oldDefinition.offset != definition.offset)
+        {
+            definition.diameter = definition.offset * oldDefinition.diameter / oldDefinition.offset;
+            return definition;
+        }
+
+        if (oldShapeInfo.count != shapeInfo.count)
+        {
+            definition.offset = shapeInfo.spacing * oldShapeInfo.offset / oldShapeInfo.spacing;
+            return definition;
+        }
+    }
+    else
+    {
+        definition.proportionsAreLocked = false;
+    }
+
+    if (definition.mode == PolygonModeType.Spacing)
+    {
+
+        definition.actualDia = shapeInfo.diameter;
+        definition.actualSpacing = shapeInfo.spacing;
+        definition.actualCount = shapeInfo.count;
+        definition.count = shapeInfo.count;
+        return definition;
+    }
+
+    // println("EL BOTTOM " ~ roundToPrecision(definition.diameter/millimeter, 3));
+    return definition;
+
+}
+
+// Identity function from Lana Saksonov of Onshape's Dev team
+function toIdentity(id is Id) returns string
+{
+    var out is string = id[0];
+    for (var i = 1; i < size(id); i += 1)
+    {
+        out ~= "." ~ id[i];
+    }
+    return out;
+}
+
+// calculate vertex count from vertex distance and diameter
+function getShapeInfo(definition is map) returns map
+{
+    var spacing;
+    var diameter;
+    var count;
+    var angle;
+    var offset = definition.offset;
+
+    if (definition.mode == PolygonModeType.Count)
+    {
+        diameter = definition.diameter;
+        count = definition.count;
+        angle = 360 / definition.count * degree;
+        spacing = (sin(angle / 2) * (diameter / 2)) * 2;
+    }
+
+    else
+    {
+        // figuring out the shapes (before any rounding to make it an even count aroud the circle)
+        const inputRadius = definition.diameter / 2;
+
+        const inputHalfChord = definition.spacing / 2;
+
+        var inputAngle;
+
+        // if acos() fials, it's trying to calculate too big of an angle. 120° is our max
+        try silent
+        {
+            inputAngle = 2 * (90 * degree - acos(inputHalfChord / inputRadius));
+        }
+        catch (error)
+        {
+            inputAngle = 120 * degree;
+        }
+
+        // rounding to get an even count
+        count = max(round(360 * degree / inputAngle), 3);
+
+        angle = 360 / count * degree;
+
+        spacing = definition.priorityType == PriorityModeType.Diameter ? inputRadius * cos(90 * degree - angle / 2) * 2 : definition.spacing;
+
+        diameter = definition.priorityType == PriorityModeType.Spacing ? (spacing / 2) / (cos(90 * degree - angle / 2)) * 2 : definition.diameter;
+    }
+
+    return { "count" : count, "angle" : angle, "spacing" : spacing, "diameter" : diameter, "offset" : offset };
+
+}
+
+
+// temp feature to troubleshoot ids
+annotation { "Feature Type Name" : "print query" }
+export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "My Query", "Filter" : EntityType.FACE, "MaxNumberOfPicks" : 1 }
+        definition.myQuery is Query;
+
+    }
+    {
+        println(definition.myQuery);
+    });
+
+
