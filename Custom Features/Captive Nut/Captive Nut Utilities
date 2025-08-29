@@ -1,0 +1,393 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1634;
+import(path : "onshape/std/geometry.fs", version : "1634.0");
+import(path : "ba850300e7a3cb4d99631706", version : "f113e0fd6cd8922b70db6461");
+
+nutC::import(path : "073a4cea114fde444f4d6c86", version : "24ee46d3c9491bee3905b092");
+
+nutT::import(path : "5526c2ea2e70507f7459f87e", version : "f4bf3e3c1ac52585af9b9db5");
+
+nutW::import(path : "f26525d8aa0a48f99e725a14", version : "5dcf9e8553a1315b70dab143");
+
+// Enums and bounds for the UI
+export enum standard
+{
+    ANSI,
+    ISO
+}
+
+export enum nutType
+{
+    Hex,
+    Square,
+    Nyloc,
+    Custom
+}
+
+export enum nutShape
+{
+    Hex,
+    Square
+}
+
+export enum insertionType
+{
+    Pocket,
+    Slot,
+    Embedded
+}
+
+// Arul Suresh's (@lemon123) editing logic 👇 (with tweaks)
+
+export function npEditLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (!definition.useNutSpec)
+    {
+        if (oldDefinition.connectorStandard != definition.connectorStandard)
+        {
+            definition = updateTSDefinitionWithStandard(oldDefinition, definition);
+        }
+        definition = setToCustomIfStandardViolated(definition);
+    }
+
+    return definition;
+}
+
+export function updateTSDefinitionWithStandard(oldDefinition is map, definition is map) returns map
+{
+    var table = getLookupTable(nutPocketTable, definition.connectorStandard);
+
+    for (var entry in table)
+    {
+        definition[entry.key] = lookupTableFixExpression(entry.value);
+    }
+
+    return definition;
+}
+
+function setToCustomIfStandardViolated(definition is map) returns map
+{
+    var table = getLookupTable(nutPocketTable, definition.connectorStandard);
+
+    if (isLookupTableViolated(definition, table))
+    {
+        definition.connectorStandard = lookupTablePath({ "standard" : "Custom", "shape" : lookupTablePath(definition.connectorStandard)["shape"] });
+    }
+
+    return definition;
+}
+
+
+
+export function getPrinterZDirection(context is Context, definition is map)
+{
+    var printerZ;
+
+    if (definition.printerZ.subqueries == [])
+    {
+        printerZ = WORLD_COORD_SYSTEM.zAxis;
+    }
+    else
+    {
+        printerZ = extractDirection(context, definition.printerZ);
+    }
+    if (definition.flipZ)
+    {
+        printerZ = -printerZ;
+    }
+
+    // size the display arrow appropriately relative to part size
+
+    var arrowLength = max(
+    25 * millimeter,
+    evDistance(context, {
+                    "side0" : qEverything(EntityType.BODY)->qBodyType(BodyType.SOLID)->qFarthestAlong(printerZ),
+                    "side1" : vector(0, 0, 0) * meter,
+                    "maximum" : true
+                }).distance
+    );
+
+    addDebugArrow(context, zeroVector(3) * millimeter, printerZ * arrowLength, arrowLength * .1, DebugColor.BLUE);
+
+    return printerZ;
+}
+
+export enum nutBoundingType
+{
+    annotation { "Name" : "Blind" }
+    BLIND,
+    annotation { "Name" : "Up to next" }
+    UP_TO_NEXT,
+    annotation { "Name" : "Up to face" }
+    UP_TO_SURFACE,
+    annotation { "Name" : "Up to part" }
+    UP_TO_BODY,
+    annotation { "Name" : "Up to vertex" }
+    UP_TO_VERTEX
+}
+
+export predicate nutBoundParametersPredicate(definition is map)
+{
+    if (definition.endBound == BoundingType.BLIND)
+
+    {
+        annotation { "Name" : "Depth" }
+        isLength(definition.depth, LENGTH_BOUNDS);
+    }
+    else if (definition.endBound == BoundingType.UP_TO_SURFACE)
+
+    {
+        annotation { "Name" : "Up to face",
+                    "Filter" : (EntityType.FACE && SketchObject.NO) || BodyType.MATE_CONNECTOR,
+                    "MaxNumberOfPicks" : 1 }
+        definition.endBoundEntityFace is Query;
+    }
+    else if (definition.endBound == BoundingType.UP_TO_BODY)
+
+    {
+        annotation { "Name" : "Up to surface or part",
+                    "Filter" : EntityType.BODY && (BodyType.SOLID || BodyType.SHEET) && SketchObject.NO,
+                    "MaxNumberOfPicks" : 1 }
+        definition.endBoundEntityBody is Query;
+    }
+    else if (definition.endBound == BoundingType.UP_TO_VERTEX)
+
+    {
+        annotation { "Name" : "Up to vertex or mate connector",
+                    "Filter" : QueryFilterCompound.ALLOWS_VERTEX,
+                    "MaxNumberOfPicks" : 1 }
+        definition.endBoundEntityVertex is Query;
+    }
+
+    if (definition.endBound == BoundingType.UP_TO_NEXT ||
+        definition.endBound == BoundingType.UP_TO_SURFACE ||
+        definition.endBound == BoundingType.UP_TO_BODY ||
+        definition.endBound == BoundingType.UP_TO_VERTEX)
+    {
+        annotation { "Name" : "Offset distance", "Column Name" : "Has offset", "UIHint" : ["DISPLAY_SHORT", "FIRST_IN_ROW"] }
+        definition.hasOffset is boolean;
+
+        if (definition.hasOffset)
+        {
+            annotation { "Name" : "Offset distance", "UIHint" : UIHint.DISPLAY_SHORT }
+            isLength(definition.offsetDistance, LENGTH_BOUNDS);
+
+            annotation { "Name" : "Opposite direction", "Column Name" : "Offset opposite direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+            definition.offsetOppositeDirection is boolean;
+        }
+    }
+}
+
+export function getNutCorner(width is ValueWithUnits, shape is string)
+{
+    var nut = {};
+    if (shape == "Hex")
+    {
+        nut.corner = vector(width / (sqrt(3)), 0 * width);
+        nut.sides = 6;
+    }
+
+    else if (shape == "Square")
+    {
+        nut.corner = vector(width / 2, width / 2);
+        nut.sides = 4;
+    }
+    return nut;
+}
+
+export function getNutPlane(context is Context, location is Query, thickness is ValueWithUnits, offset is ValueWithUnits, angle is ValueWithUnits)
+{
+    var nutPlane;
+
+    // plane at Location Point coplanar to sketchPlane
+    try silent
+    {
+        var sketchPlane = evOwnerSketchPlane(context, {
+                "entity" : location
+            });
+        var normal = sketchPlane.normal;
+        var x = sketchPlane.x;
+        var origin = evVertexPoint(context, {
+                "vertex" : location
+            });
+        nutPlane = plane(origin, normal, x);
+    }
+
+    // plane from mate connector
+    try silent
+    {
+        var mateCoord = evMateConnector(context, {
+                "mateConnector" : location
+            });
+        var normal = mateCoord.zAxis;
+        var x = mateCoord.xAxis;
+        nutPlane = plane(mateCoord);
+    }
+    // moving the front plane by the thickness of the nut
+    nutPlane.origin = nutPlane.origin - ((thickness + offset) * nutPlane.normal);
+
+    // rotating the plane if needed
+    var roationTransform = rotationAround(line(nutPlane.origin, nutPlane.normal), angle).linear;
+    nutPlane.x = roationTransform * nutPlane.x;
+
+    return nutPlane;
+}
+
+export function displayNut(context is Context, id is Id, nutPlane is map, nut is map, nutThickness is ValueWithUnits)
+{
+    // Adding a nut to display
+    var nutSketch = newSketchOnPlane(context, id + "nutSketch", {
+            "sketchPlane" : nutPlane
+        });
+
+    skRegularPolygon(nutSketch, "nut", {
+                "center" : vector(0, 0) * inch,
+                "firstVertex" : nut.corner,
+                "sides" : nut.sides
+            });
+
+    skSolve(nutSketch);
+
+    opExtrude(context, id + "nutExtrude", {
+                "entities" : qSketchRegion(id + "nutSketch"),
+                "direction" : nutPlane.normal,
+                "endBound" : BoundingType.BLIND,
+                "endDepth" : nutThickness,
+            });
+
+    var nutBody = qCreatedBy(id + "nutExtrude", EntityType.BODY);
+    var nutEdges = qOwnedByBody(nutBody, EntityType.EDGE); /*adding edges since faces can't be seen through parts*/
+
+    var debugEntities = qUnion([nutBody, nutEdges]);
+
+    addDebugEntities(context, debugEntities, DebugColor.MAGENTA);
+
+    opDeleteBodies(context, id + "deleteBodies1", {
+                "entities" : qUnion([qCreatedBy(id + "nutExtrude"), qCreatedBy(id + "nutSketch")])
+            });
+}
+
+export function moveFaceFeatureByOffset(context is Context, id is Id, faces is Query, offsetDistance is ValueWithUnits)
+{
+    var moveFaceDefinition = {
+        "outputType" : MoveFaceOutputType.MOVE,
+        "moveFaces" : faces,
+        "moveFaceType" : MoveFaceType.OFFSET,
+        "limitType" : MoveFaceBoundingType.BLIND,
+        "offsetDistance" : offsetDistance,
+        "oppositeDirection" : true
+    };
+    moveFace(context, id, moveFaceDefinition);
+}
+
+
+export predicate nutSpecPredicate(definition is map)
+{
+    annotation { "Name" : "Standard", "Lookup Table" : nutPocketTable, "UIHint" : "REMEMBER_PREVIOUS_VALUE" }
+    definition.connectorStandard is LookupTablePath;
+
+    annotation { "Name" : "Nut width", "UIHint" : "REMEMBER_PREVIOUS_VALUE", "Icon" : nutW::BLOB_DATA }
+    isLength(definition.nutW, { (inch) : [1e-4, 0.25, 19685] } as LengthBoundSpec);
+
+    annotation { "Name" : "Nut thickness", "UIHint" : "REMEMBER_PREVIOUS_VALUE", "Icon" : nutT::BLOB_DATA }
+    isLength(definition.nutT, { (inch) : [1e-4, 0.09375, 19685] } as LengthBoundSpec);
+
+    annotation { "Name" : "Nut clearance", "UIHint" : "REMEMBER_PREVIOUS_VALUE", "Icon" : nutC::BLOB_DATA }
+    isLength(definition.nutC, { (millimeter) : [-100000, .2, 100000], (inch) : .001 } as LengthBoundSpec);
+}
+
+export function getPocketDirection(definition is map, nutPlane is Plane, printerZ is Vector) returns Vector
+{
+    var pocketDirection;
+    if (definition.insertionType == insertionType.Pocket)
+    {
+        pocketDirection = nutPlane.normal;
+    }
+    else if (definition.insertionType == insertionType.Slot)
+    {
+        pocketDirection = nutPlane.x;
+    }
+    else if (definition.insertionType == insertionType.Embedded)
+    {
+        // finding the angle between printer z and nut. the min function makes it so the angle never exceeds 90°.
+        var nutToPrinterAngle = min(angleBetween(printerZ, nutPlane.normal), angleBetween(-printerZ, nutPlane.normal));
+        if (nutToPrinterAngle > 45 * degree)
+        {
+            // finds a direction for the side-inserted support that's in the nut plane, and points as close to printer z as possible. I'm doing this by making a point way above the nutPlane.origin in the printerZ direction then projecting that point back to the nut plane and making a line.
+            var projectedPoint = project(nutPlane, nutPlane.origin + 100 * meter * printerZ);
+            pocketDirection = line(nutPlane.origin, projectedPoint).direction;
+        }
+        else
+        {
+            pocketDirection = printerZ;
+        }
+    }
+    // flip the pocket direction if needed
+    pocketDirection = definition.flipExtrude ? -pocketDirection : pocketDirection;
+
+    return pocketDirection;
+}
+
+
+/**
+ * finds support body faces adjacent to the nut. Of that list, finds faces at too sharp an angle to 3D print well and deletes them. returns a query for the faces adjacent to the nut.
+ */
+export function getAdjacentNutFacesAndDeleteSliverFaces(context is Context, id is Id, pocketFaces is Query, pocketDirection is Vector) returns Query
+{                   var sliverDeletionAngle = 15*degree;
+                    var pocketFacesArray = evaluateQuery(context, pocketFaces);
+                    var nutFaces = [];
+                    var deleteFaces =[];
+                    var i = 0; /*helps with duplicate IDs in case more than one face should be deleted*/
+                    for (var face in pocketFacesArray)
+                    {
+                        var angle;
+                     try
+                     {
+                         
+                         angle = angleBetween(evFaceTangentPlane(context, {
+                                        "face" : face,
+                                        "parameter" : vector(0.5, 0.5)
+                                    }).normal, pocketDirection);
+                     }
+                     catch (error)
+                     {
+                         println("failed on "~i);
+                         debug(context, face, DebugColor.RED);
+                     }   
+
+                        if (angle > 90 * degree + 0.00001 * degree) /*is the face facing away from the pocket direction? then it's adjacent to the nut*/
+                        {
+                            if (angle < 90 * degree + sliverDeletionAngle) /*of the adjacent faces, which are so thin that they won't print well? delete them, otherwise add them to a list for offsetting with clearance later*/
+                            {
+                                deleteFaces = append(deleteFaces, face);
+                            }
+                            else
+                            {
+                                nutFaces = append(nutFaces, face);
+                            }
+                        }
+                        i += 1;
+                    }
+                    if (deleteFaces != [])
+                    {
+                                opDeleteFace(context, id + "deleteFace1" + i, {
+                                            "deleteFaces" : qUnion(deleteFaces),
+                                            "includeFillet" : false,
+                                            "capVoid" : false,
+                                            "leaveOpen" : false
+                                        });
+                    }
+                    
+                    
+                    return qUnion(nutFaces);
+}
+// export function getErrorBoxInfo(Box is box)
+// {
+    
+// }
+
+
+
