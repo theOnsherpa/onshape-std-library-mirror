@@ -1,0 +1,84 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1576;
+import(path : "onshape/std/geometry.fs", version : "1576.0");
+export import(path : "onshape/std/boolean.fs", version : "1576.0");
+export import(path : "b82bd38a9390b4dd3155b161", version : "25f259d811ce5137fa6d74ba");
+icon::import(path : "e30d47e55e8db8c2c22f8cad", version : "670f4cc75a63d83ac7b3af9e");
+
+annotation { "Feature Type Name" : "Cone",
+        "Feature Type Description" : "Creates cones and cylinders",
+        "Manipulator Change Function" : "twoEndedManipulatorFunction",
+        "Editing Logic Function" : "twoEndedPrimitiveEditingLogic",
+        "Icon" : icon::BLOB_DATA }
+export const cylinderCone = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "isPrism", "UIHint" : UIHint.ALWAYS_HIDDEN, "Default" : false, "Filter Selector" : ["cylinder", "rod"] }
+        definition.isPrism is boolean;
+
+        twoEndedPrimitivePredicate(definition);
+
+    }
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        // adding some values to the definition depending on linked or un-linked inputs. i.e. "definition.usedDia1" and "definition.usedLength2"
+        definition = getTwoEndedValues(context, id, definition);
+
+        // if nothing is selected, or the origin is selected, place an item on the origin. try silent is used because the query for the studio origin fails when feature patterning this feature.
+        try silent
+        {
+            if (isOriginSelected(context, definition.locations))
+            {
+                // if the origin is selected, subtract it from the query so that the object below can replace it (keeps IDs stable and doesn't dublicate objects when only the origin is selected)
+                definition.locations = definition.locations->qSubtraction(qCreatedBy(makeId("Origin")));
+
+                // make a cone on the origin
+                fCone(context, id, {
+                            "topCenter" : vector(0 * inch, 0 * inch, definition.usedLength1),
+                            "bottomCenter" : vector(0 * inch, 0 * inch, -definition.usedLength2),
+                            "topRadius" : definition.usedDia1 / 2,
+                            "bottomRadius" : definition.usedDia2 / 2
+                        });
+            }
+        }
+
+        // if anything is selected, place an item at the center
+        forEachEntity(context, id + "operation", definition.locations, function(vertex is Query, id is Id)
+            {
+                // make a cone on the origin
+                fCone(context, id + "cone", {
+                            "topCenter" : vector(0 * inch, 0 * inch, definition.usedLength1),
+                            "bottomCenter" : vector(0 * inch, 0 * inch, -definition.usedLength2),
+                            "topRadius" : definition.usedDia1 / 2,
+                            "bottomRadius" : definition.usedDia2 / 2
+                        });
+                // move the cone into place
+                var transforms = getTransform(context, vertex);
+
+                var body = qCreatedBy(id + "cone", EntityType.BODY);
+
+                opTransform(context, id + "transform", {
+                            "bodies" : body,
+                            "transform" : transforms
+                        });
+
+            });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        // merge bodies
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+
+        // creating manipulators
+
+        twoEndedPrimitiveManipulators(context, id, definition);
+
+    });
+
