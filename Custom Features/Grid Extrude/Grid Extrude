@@ -1,0 +1,394 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2022;
+import(path : "onshape/std/common.fs", version : "2022.0");
+
+// bringing in the full extrude feature
+export import(path : "12312312345abcabcabcdeff/bc3868bce6a579873b8d805d/aff9bec3150a48098a8184ac", version : "4237edc40958dd4124c3a697");
+
+// predicates and UI stuff
+export import(path : "f819fff52621b7bb61c35220", version : "684efa86033d1a41baf78687");
+
+// additional imports
+import(path : "12312312345abcabcabcdeff/bc3868bce6a579873b8d805d/46edea06688f450f801961e1", version : "a05fef6837533a9835b334ef");
+import(path : "12312312345abcabcabcdeff/bc3868bce6a579873b8d805d/a1ec05982b87401dad3728db", version : "fe6d800becb2782a51eb0e12");
+export import(path : "9f4c9835d8018ff7dbdb5683/3293edb6ba49ae82a5513917/c6e1bb9b94eaf2001e2b9467", version : "ca296eb60b2bdf0a052c2c1a");
+import(path : "9f4c9835d8018ff7dbdb5683/3293edb6ba49ae82a5513917/c60f4a6e12f07acee647a2a1", version : "198e65e227da4b79f32bd021");
+icon::import(path : "07adf031b088958ed217c8ba", version : "9ff29391dc3dcd3949eb6081");
+descriptionImage::import(path : "d43e2c12d2b86008fff8c8be", version : "77660c5762422628907bf315");
+
+
+annotation { "Feature Type Name" : "Grid extrude",
+        "Manipulator Change Function" : "extrudeManipulatorChange",
+        "Filter Selector" : "allparts",
+        "Editing Logic Function" : "extrudeEditLogic",
+        "Icon" : icon::BLOB_DATA,
+        "Feature Type Description" : "Works like the native extrude feature, but extrudes a grid of shapes instead of a fully filled extrusion of the input region. While it's a general-purpose feature with many uses, it's especially useful for things like hexagonal ribbing for strengthening plastic parts.",
+        "Description Image" : descriptionImage::BLOB_DATA
+    }
+export const gridExtrude = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        booleanStepTypePredicate(definition);
+
+        mainViewExtrudePredicate(definition);
+
+        extrudeGridPredicate(definition);
+
+        booleanStepScopePredicate(definition);
+    }
+    {
+        var remainingTransform = getRemainderPatternTransform(context, { "references" : qUnion([definition.entities, definition.gridCenter]) });
+
+        const gridCenter = getGridCenter(context, definition);
+
+        if (definition.invertGrid)
+        {
+            definition.draftPullDirection = !definition.draftPullDirection;
+            definition.secondDirectionDraftPullDirection = !definition.secondDirectionDraftPullDirection;
+        }
+
+        var mainDef = definition;
+        mainDef.operationType = NewBodyOperationType.NEW;
+
+        if (definition.invertGrid)
+        {
+            mainDef.draftPullDirection = !mainDef.draftPullDirection;
+            mainDef.secondDirectionDraftPullDirection = !mainDef.secondDirectionDraftPullDirection;
+        }
+
+        if (definition.addBoundary && definition.boundaryAlignmentType == BoundaryAlignmentType.Centered)
+        {
+            mainDef.hasDraft = false;
+            mainDef.hasSecondDirectionDraft = false;
+        }
+
+        if (definition.addBoundary && definition.boundaryAlignmentType == BoundaryAlignmentType.Outside)
+        {
+            mainDef.draftPullDirection = !mainDef.draftPullDirection;
+            mainDef.secondDirectionDraftPullDirection = !mainDef.secondDirectionDraftPullDirection;
+        }
+
+        // extruding the selected regions
+        extrudeCheckingForDraftFailure(id + "mainBody", context, mainDef);
+        const mainBody = qCreatedBy(id + "mainBody", EntityType.BODY);
+
+        // adding the grid cells
+        const isHexagon = definition.GridShapeType == GridShapeType.Hexagon;
+        const isTriangle = definition.GridShapeType == GridShapeType.Triangle;
+        const isSquare = definition.GridShapeType == GridShapeType.Square;
+        const isRectangle = definition.GridShapeType == GridShapeType.Rectangle;
+        const isCircleHex = definition.GridShapeType == GridShapeType.CircleHex;
+        const isCicleSq = definition.GridShapeType == GridShapeType.CircleSq;
+
+        definition.isHexagonal = isHexagon || isTriangle || isCircleHex;
+
+
+        var sketchPlane = evPlane(context, { "face" : definition.entities->qNthElement(0) });
+
+        if (!isQueryEmpty(context, definition.gridDirection))
+        {
+            sketchPlane.x = processGridDirection(context, definition.gridDirection, sketchPlane);
+        }
+
+        const direction = !definition.oppositeDirection ? -sketchPlane.normal : sketchPlane.normal;
+        sketchPlane.origin = gridCenter;
+
+        const gridAngle = definition.flipGridAngle ? -definition.gridAngle : definition.gridAngle;
+
+        var rotation = rotationAround(line(sketchPlane.origin, sketchPlane.normal), gridAngle);
+
+        sketchPlane = rotation * sketchPlane;
+
+        const gridCoord = coordSystem(sketchPlane);
+        definition.transformToGridCoord = toWorld(gridCoord);
+
+        const width = definition.width;
+        const length = isRectangle ? definition.length : definition.width;
+
+
+        var shapeSketch = newSketchOnPlane(context, id + "shapeSketch", { "sketchPlane" : sketchPlane });
+
+        if (isHexagon)
+        {
+            skRegularPolygon(shapeSketch, "hexagon", {
+                        "center" : vector(0, 0) * inch,
+                        "firstVertex" : vector(width / 2, tan(30 * degree) * width / 2),
+                        "sides" : 6
+                    });
+        }
+
+        if (isTriangle)
+        {
+            const firstXDist = definition.ribThickness / 2;
+            const firstYDist = tan(60 * degree) * (width / 2);
+            const centerDist = (width + definition.ribThickness) / 2;
+
+            skRegularPolygon(shapeSketch, "triangle1", {
+                        "center" : vector(centerDist, 0 * inch),
+                        "firstVertex" : vector(firstXDist, firstYDist),
+                        "sides" : 3
+                    });
+
+            skRegularPolygon(shapeSketch, "triangle2", {
+                        "center" : vector(-centerDist, 0 * inch),
+                        "firstVertex" : vector(-firstXDist, firstYDist),
+                        "sides" : 3
+                    });
+
+        }
+
+        if (isSquare)
+        {
+            skPolyline(shapeSketch, "square", {
+                        "points" : [
+                            vector(width / 2, width / 2),
+                            vector(-width / 2, width / 2),
+                            vector(-width / 2, -width / 2),
+                            vector(width / 2, -width / 2),
+                            vector(width / 2, width / 2),
+                        ]
+                    });
+        }
+
+        if (isRectangle)
+        {
+            skPolyline(shapeSketch, "rectangle", {
+                        "points" : [
+                            vector(width / 2, length / 2),
+                            vector(-width / 2, length / 2),
+                            vector(-width / 2, -length / 2),
+                            vector(width / 2, -length / 2),
+                            vector(width / 2, length / 2),
+                        ]
+                    });
+        }
+
+        if (isCircleHex || isCicleSq)
+        {
+            skCircle(shapeSketch, "circle", {
+                        "center" : vector(0, 0) * inch,
+                        "radius" : width / 2
+                    });
+        }
+
+        skSolve(shapeSketch);
+
+        const instanceFaces = evaluateQuery(context, qSketchRegion(id + "shapeSketch"));
+
+        var gridDef = definition;
+        gridDef.draftPullDirection = !gridDef.draftPullDirection;
+        gridDef.secondDirectionDraftPullDirection = !gridDef.secondDirectionDraftPullDirection;
+        gridDef.operationType = NewBodyOperationType.NEW;
+        gridDef.endBound = BoundingType.THROUGH_ALL;
+        gridDef.hasSecondDirection = true; // always extrude both ways for cases where not all selected inputs are co-planar.
+        gridDef.secondDirectionBound = BoundingType.THROUGH_ALL;
+        if (gridDef.oppositeDirection == gridDef.secondDirectionOppositeDirection) // since it's through all, they can't point the same way
+        {
+            gridDef.secondDirectionOppositeDirection = !gridDef.secondDirectionOppositeDirection;
+        }
+
+        // Extrude the grid instances. using a loop here to cover the case where the pattern is a triangle and the gap is 0. In that case they would merge into a diamond unless they are done individually.
+        for (var i = 0; i < size(instanceFaces); i += 1)
+        {
+            gridDef.entities = instanceFaces[i];
+            extrude(context, id + "grid" + i, gridDef);
+        }
+
+        if (!tolerantEquals(definition.cornerRadius, 0 * meter) && !isCircleHex && !isCicleSq) //only apply a fillet if the value isn't 0
+        {
+            const filletEdges = qNonCapEntity(id + "grid", EntityType.EDGE)->qSubtraction(qEverything(EntityType.EDGE)->qCoincidesWithPlane(sketchPlane));
+
+            opFillet(context, id + "fillet1", {
+                        "entities" : filletEdges,
+                        "radius" : definition.cornerRadius
+                    });
+        }
+
+        const boxExtension = definition.isHexagonal ? width * 1.1548 : sqrt(width ^ 2 + length ^ 2); // extend the box by the diagonal of the rectangle/square, or point-to-point of the hexagon
+
+        var bBoxes = []; // a box for each individual face so we can check whether points are inside.
+        var faceArray = evaluateQuery(context, definition.entities);
+        for (var face in faceArray)
+        {
+            const newBox = evBox3d(context, {
+                            "topology" : face,
+                            "tight" : false,
+                            "cSys" : gridCoord
+                        })->extendBox3d(boxExtension, 0);
+            bBoxes = append(bBoxes, newBox);
+        }
+
+        definition.xSpacing = width + definition.ribThickness; // space between instance centers in x direction
+        definition.ySpacing = !definition.isHexagonal ? length + definition.ribThickness : sin(60 * degree) * (width + definition.ribThickness); // space between instance centers in y direction. If it's square, it's the user's value. if it's a hex it uses some trig.
+
+        if (isTriangle)
+        {
+            definition.xSpacing = 3 * (width + definition.ribThickness);
+            definition.ySpacing = 3 * (width + definition.ribThickness) / sqrt(3) / 2;
+        }
+
+        var pointsAndCorrespondingInfo = {};
+        pointsAndCorrespondingInfo.points = [];
+        pointsAndCorrespondingInfo.instanceNames = [];
+        pointsAndCorrespondingInfo.transforms = [];
+        for (var bBox in bBoxes)
+        {
+            const gridInfo = gridInfo(definition, bBox);
+            const newGrid = getGridPointsInBox(definition, bBox);
+            pointsAndCorrespondingInfo.points = concatenateArrays([pointsAndCorrespondingInfo.points, newGrid.points]);
+            pointsAndCorrespondingInfo.instanceNames = concatenateArrays([pointsAndCorrespondingInfo.instanceNames, newGrid.instanceNames]);
+            pointsAndCorrespondingInfo.transforms = concatenateArrays([pointsAndCorrespondingInfo.transforms, newGrid.transforms]);
+        }
+
+        const dedupArrays = deduplicatePointsAndCorrespondingInfo(pointsAndCorrespondingInfo); // cleaning duplicate points out of the list. This is likely when two faces are adjacent.
+        const points = dedupArrays.points;
+        const instanceNames = dedupArrays.instanceNames;
+        const transforms = dedupArrays.transforms;
+
+        if (definition.previewPoints)
+        {
+            addDebugEntities(context, qCreatedBy(id + "shapeSketch", EntityType.BODY), DebugColor.MAGENTA);
+            // addDebugLine(context, sketchPlane.origin, evVertexPoint(context, { "vertex" : definition.gridCenter }), DebugColor.MAGENTA);
+            addDebugPoint(context, sketchPlane.origin, DebugColor.MAGENTA);
+            for (var point in points)
+                addDebugPoint(context, point, DebugColor.MAGENTA);
+        }
+
+
+
+        opPattern(context, id + "hexPattern", {
+                    "entities" : qCreatedBy(id + "grid", EntityType.BODY),
+                    "transforms" : transforms,
+                    "instanceNames" : instanceNames,
+                });
+
+        var tools = qUnion([qCreatedBy(id + "grid", EntityType.BODY), qCreatedBy(id + "hexPattern", EntityType.BODY)]);
+
+        const operationType = definition.invertGrid ? BooleanOperationType.SUBTRACT_COMPLEMENT : BooleanOperationType.SUBTRACTION;
+
+        opBoolean(context, id + "hexBoolean", {
+                    "tools" : tools,
+                    "targets" : mainBody,
+                    "operationType" : operationType
+                });
+
+
+        // adding the boundary rib if needed
+        if (definition.addBoundary && !tolerantEquals(definition.ribThickness, 0 * meter))
+        {
+            var boundaryDef = definition;
+
+            boundaryDef.bodyType = ExtendedToolBodyType.THIN;
+            boundaryDef.flipWall = true;
+            boundaryDef.wallShape = boundaryDef.entities;
+            boundaryDef.operationType = NewBodyOperationType.NEW;
+
+            if (!boundaryDef.boundaryMidPlane)
+            {
+                boundaryDef.thickness1 = boundaryDef.flipBoundary ? boundaryDef.boundaryThickness2 : boundaryDef.boundaryThickness1;
+                boundaryDef.thickness2 = boundaryDef.flipBoundary ? boundaryDef.boundaryThickness1 : boundaryDef.boundaryThickness2;
+            }
+            else
+            {
+                boundaryDef.thickness1 = boundaryDef.boundaryMidThickness / 2;
+                boundaryDef.thickness2 = boundaryDef.boundaryMidThickness / 2;
+            }
+
+
+            // if (boundaryDef.boundaryAlignmentType == BoundaryAlignmentType.Centered)
+            // {
+            //     boundaryDef.thickness1 = (boundaryDef.boundaryThickness1 + boundaryDef.boundaryThickness2) / 2;
+            //     boundaryDef.thickness2 = (boundaryDef.boundaryThickness1 + boundaryDef.boundaryThickness2) / 2;
+            // }
+            // else if (boundaryDef.boundaryAlignmentType == BoundaryAlignmentType.Inside)
+            // {
+            //     boundaryDef.thickness1 = boundaryDef.boundaryThickness;
+            //     boundaryDef.thickness2 = 0 * meter;
+            // }
+            // else if (boundaryDef.boundaryAlignmentType == BoundaryAlignmentType.Outside)
+            // {
+            //     boundaryDef.thickness1 = 0 * meter;
+            //     boundaryDef.thickness2 = boundaryDef.boundaryThickness;
+            // }
+
+            extrude(context, id + "boundary", boundaryDef);
+
+            const boundaryBody = qCreatedBy(id + "boundary", EntityType.BODY);
+
+            const boundaryOperationType = !definition.invertGrid ? BooleanOperationType.UNION : BooleanOperationType.SUBTRACTION;
+            const boundaryTools = !definition.invertGrid ? qUnion([mainBody, boundaryBody]) : boundaryBody;
+
+            opBoolean(context, id + "boundaryBoolean", {
+                        "tools" : boundaryTools,
+                        "targets" : mainBody,
+                        "operationType" : boundaryOperationType
+                    });
+
+            if (!tolerantEquals(definition.cornerRadius, 0 * meter) && !isCircleHex && !isCicleSq)
+            {
+                const moreToFillet = qUnion([qNonCapEntity(id + "boundary", EntityType.EDGE), qCreatedBy(id + "boundaryBoolean", EntityType.EDGE)]);
+                opFillet(context, id + "fillet2", {
+                            "entities" : moreToFillet,
+                            "radius" : definition.cornerRadius
+                        });
+            }
+        }
+
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : qCreatedBy(id + "shapeSketch", EntityType.BODY)
+                });
+
+
+        addExtrudeManipulator(context, id, definition, definition.entities, line(sketchPlane.origin, sketchPlane.normal), false);
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+
+    });
+
+/**
+ * Some cases will cause an extrude with draft to fail (even with the native feature). Usually it's when extruding up-to-part and there end up being no actual side faces to draft, which could be common with the use-case of adding a grid of ribs to a part that's already drafted. With the native feature this doesn't matter, but I still want the ribs to draft, so I want to handle this without failing.
+ */
+export function extrudeCheckingForDraftFailure(id is Id, context is Context, definition is map)
+{
+    var mainDef = definition;
+    const extrudeId = id + "extrude";
+    // try extruding with draft
+    try silent
+    {
+        extrude(context, extrudeId + unstableIdComponent("byDefinition"), mainDef);
+    }
+
+    catch
+    {
+        // if it fails try turning off dir 1 draft
+        try silent
+        {
+            mainDef.hasDraft = false;
+            extrude(context, extrudeId + unstableIdComponent("noStartDraft"), mainDef);
+        }
+        catch
+        {
+            // if it still doesn't work, turn off dir 2 draft instead
+            try silent
+            {
+                mainDef.hasDraft = definition.hasDraft;
+                mainDef.hasSecondDirectionDraft = false;
+                extrude(context, extrudeId + unstableIdComponent("noEndDraft"), mainDef);
+            }
+            // if none of that works, turn off all draft and give it a go
+            catch
+            {
+                mainDef.hasDraft = false;
+                mainDef.hasSecondDirectionDraft = false;
+                extrude(context, extrudeId + unstableIdComponent("noDraft"), mainDef);
+            }
+        }
+    }
+}
