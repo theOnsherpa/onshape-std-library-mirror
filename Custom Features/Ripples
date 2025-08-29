@@ -1,0 +1,536 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1963;
+import(path : "onshape/std/common.fs", version : "1963.0");
+export import(path : "9f4c9835d8018ff7dbdb5683/86683b3a4e14d028b5be2e76/f937aebd788e8d724a4de67b", version : "bf79fca9e97b35e1a449985c");
+
+export enum RippleCurveType
+{
+    bSpline,
+    Fit,
+}
+
+export enum TextureCreationType
+{
+    Splash,
+    Pattern
+}
+
+export enum TexturePresetType
+{
+    Bumps,
+    Lines,
+}
+
+export enum CacheType
+{
+    Distances,
+    Points,
+}
+
+annotation { "Feature Type Name" : "Ripples",
+        "Editing Logic Function" : "ripplesEditingLogic" }
+export const ripples = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Cache mode", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE, "Description" : "Cached mode does the calculations for the points only while the feature is being edited, and stores the resulting points. This means that most of the comutationally intensive parts of the feature don't happen on a normal part studio regeneration, speeding up the feature substantially. The downside is that it cannot be configured or changed by variables upstream." }
+        definition.cacheMode is boolean;
+
+        if (definition.cacheMode)
+        {
+            annotation { "Name" : "Cache type",
+                        "UIHint" : UIHint.SHOW_LABEL,
+                        "Description" : "'Distances' only caches the measured distances, but recalculates the point locations each time. This means that if the underlying surface changes shape the rippels will follow it, but it takes some time to compute. 'Points' caches the actual point locations, so the feature will no longer respond parametrically, but it will regenerate several times more quickly." }
+            definition.cacheType is CacheType;
+        }
+
+        annotation { "Name" : "Cached distances", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.cachedDistances);
+
+        annotation { "Name" : "Cached points", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.cachedPoints);
+
+        annotation { "Name" : "Pause regeneration" }
+        definition.pause is boolean;
+
+        annotation { "Name" : "Preview points", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.preview is boolean;
+
+        annotation { "Name" : "Face to ripple", "Filter" : EntityType.FACE, "MaxNumberOfPicks" : 1 }
+        definition.face is Query;
+
+        annotation { "Name" : "Proxy face (optional)",
+                    "Filter" : EntityType.FACE,
+                    "MaxNumberOfPicks" : 1,
+                    "Description" : "Choose a different face to measure points from to transfer them to the 'Face to ripple'. This is useful for thinking through patterns in 2D and then applying them to a 3D shape, sort of like UV unwrapping." }
+        definition.proxyFace is Query;
+
+        annotation { "Name" : "Creation type" }
+        definition.creationType is TextureCreationType;
+
+        if (definition.creationType == TextureCreationType.Pattern)
+        {
+            annotation { "Name" : "Pattern type" }
+            definition.texturePreset is TexturePresetType;
+
+            annotation { "Name" : "Swap pattern", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+            definition.swapPattern is boolean;
+
+            annotation { "Name" : "Amplitude",
+                        "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE],
+                        "Description" : "The max height of the pattern ripples. Note, this is the heights of the bSplineSurface control points, not the height of the wave crest." }
+            isLength(definition.patternAmplitude, LENGTH_BOUNDS);
+
+
+        }
+
+        if (definition.creationType == TextureCreationType.Splash)
+        {
+            annotation { "Name" : "Splash objects", "Item name" : "Object group", "Item label template" : "Splash group", "Driven query" : "splashObjects" }
+            definition.splash is array;
+            for (var group in definition.splash)
+            {
+                annotation { "Name" : "Object group", "Filter" : EntityType.BODY || EntityType.FACE || EntityType.EDGE || EntityType.VERTEX,
+                        }
+                group.splashObjects is Query;
+
+                annotation { "Name" : "Flip ripple", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                group.splashFlip is boolean;
+
+                annotation { "Name" : "Frequency",
+                            "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                            "Description" : "The max height of the ripples from the splash objects. Note, this is the heights of the bSplineSurface control points, not the height of the wave crest." }
+                isLength(group.splashFrequency, LENGTH_BOUNDS);
+
+                annotation { "Name" : "Amplitude",
+                            "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                            "Description" : "The max height of the ripples from the splash objects. Note, this is the heights of the bSplineSurface control points, not the height of the wave crest." }
+                isLength(group.splashAmplitude, LENGTH_BOUNDS);
+
+                annotation { "Name" : "Decay range",
+                            "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                            "Description" : "The distance ripples emanate from the splash objects. A setting of 0 makes the range infinite." }
+                isLength(group.splashRange, ZERO_DEFAULT_LENGTH_BOUNDS);
+            }
+        }
+
+        annotation { "Name" : "Modifier objects", "Item name" : "Object group", "Item label template" : "Mod group", "Driven query" : "modObjects" }
+        definition.mods is array;
+        for (var group in definition.mods)
+        {
+            annotation { "Name" : "Object group", "Filter" : EntityType.BODY || EntityType.FACE || EntityType.EDGE || EntityType.VERTEX,
+                    }
+            group.modObjects is Query;
+
+            annotation { "Name" : "Range start",
+                        "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                        "Description" : "The distance from the damping object which it influences." }
+            isLength(group.dampingRangeStart, ZERO_DEFAULT_LENGTH_BOUNDS);
+
+            annotation { "Name" : "Range",
+                        "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                        "Description" : "The distance from the damping object which it influences." }
+            isLength(group.dampingRange, LENGTH_BOUNDS);
+
+            // annotation { "Name" : "Range end",
+            //             "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+            //             "Description" : "The distance from the damping object which it influences." }
+            // isLength(group.dampingRangeEnd, LENGTH_BOUNDS);
+
+            annotation { "Name" : "Near factor",
+                        "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                        "Description" : "0 makes waves near the damping object disappear completely, 0.5 reduces them by half, 1 has no effect, and numbers larger than 1 increase the wave height." }
+            isReal(group.dampingNearFactor, { (unitless) : [0, 0, 1e6] } as RealBoundSpec);
+
+            annotation { "Name" : "Far factor",
+                        "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                        "Description" : "0 makes waves near the damping object disappear completely, 0.5 reduces them by half, 1 has no effect, and numbers larger than 1 increase the wave height." }
+            isReal(group.dampingFarFactor, { (unitless) : [0, 1, 1e6] } as RealBoundSpec);
+        }
+
+        annotation { "Name" : "U samples" }
+        isInteger(definition.uCount, { (unitless) : [1, 20, 1e5] } as IntegerBoundSpec);
+
+        annotation { "Name" : "V samples" }
+        isInteger(definition.vCount, { (unitless) : [1, 20, 1e5] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Shift",
+                    "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                    "Description" : "Shifting the ripple up or down. A value of -1 makes the whole ripple below the face; 0 makes it equally above and below the face; and 1 makes it all above the face. Note, this affects the control point movement, not the wave crest height." }
+        isReal(definition.shift, { (unitless) : [-1, 1, 1] } as RealBoundSpec);
+
+        annotation { "Name" : "Smoothness",
+                    "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                    "Description" : "Controls the degree of the resulting b-spline surface. Higher numbers will be smoother, but less defined. 5 is usually a good balance." }
+        isInteger(definition.surfaceDegree, { (unitless) : [2, 5, 15] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Replace face", "Default" : true }
+        definition.replace is boolean;
+
+    }
+    {
+        const useProxy = !isQueryEmpty(context, definition.proxyFace);
+        
+        const approxFace = evApproximateBSplineSurface(context, { "face" : definition.face }).bSplineSurface;
+        definition.uCount = approxFace.isUPeriodic ? definition.uCount - 1 : definition.uCount;
+        definition.vCount = approxFace.isVPeriodic ? definition.vCount - 1 : definition.vCount;
+        var rippleDistances;
+        var ripplePoints;
+
+        if (!definition.cacheMode) // full feature calculation
+        {
+            const rippleFacePlanes = getRippleFacePlanes(context, id, definition).facePlanes;
+            var planesToMeasure = rippleFacePlanes;
+            if (useProxy)
+            {
+                planesToMeasure = getRippleFacePlanes(context, id, definition).proxyFacePlanes;
+            }
+
+            rippleDistances = getRippleDistances(context, id, definition, planesToMeasure);
+            ripplePoints = getRipplePoints(context, id, definition, rippleFacePlanes, rippleDistances);
+        }
+
+        else if (definition.cacheMode) // pulling some caches information to lighten calculations if needed
+        {
+            rippleDistances = definition.cachedDistances;
+            if (definition.cacheType == CacheType.Points)
+            {
+                ripplePoints = fixVectorArrayFromEditingLogic(definition.cachedPoints, definition.uCount, definition.vCount);
+            }
+            else
+            {
+                const rippleFacePlanes = getRippleFacePlanes(context, id, definition).facePlanes;
+                ripplePoints = getRipplePoints(context, id, definition, rippleFacePlanes, rippleDistances);
+            }
+        }
+
+        if (definition.pause && definition.preview) // generating points for a paused preview
+        {
+            ripplePoints = [];
+            const rippleFacePlanes = getRippleFacePlanes(context, id, definition).facePlanes;
+            for (var plane in rippleFacePlanes)
+            {
+                ripplePoints = append(ripplePoints, plane.origin);
+            }
+        }
+
+        if (!definition.pause) // create the surface, replace the face, and clean up construction stuff.
+        {
+            const surfaceDefinition = bSplineSurface({
+                        "uDegree" : definition.surfaceDegree,
+                        "vDegree" : definition.surfaceDegree,
+                        "isUPeriodic" : approxFace.isUPeriodic,
+                        "isVPeriodic" : approxFace.isVPeriodic,
+                        "controlPoints" : ripplePoints as ControlPointMatrix
+                    });
+
+            opCreateBSplineSurface(context, id + "bSplineSurface1", {
+                        "bSplineSurface" : surfaceDefinition
+                    });
+
+            var rippledSurface = qCreatedBy(id + "bSplineSurface1", EntityType.FACE);
+
+            if (definition.replace)
+            {
+                opReplaceFace(context, id + "replaceFace1", {
+                            "replaceFaces" : definition.face,
+                            "templateFace" : rippledSurface
+                        });
+
+                opDeleteBodies(context, id + "deleteBodies1", {
+                            "entities" : rippledSurface
+                        });
+            }
+        }
+
+        if (definition.preview) // debugging the preview points
+        {
+            if (definition.pause)
+            {
+                reportFeatureWarning(context, id, "Regeneration is paused.");
+
+                for (var point in ripplePoints)
+                {
+                    addDebugPoint(context, point, DebugColor.MAGENTA); // for when the points are in a single list
+                }
+            }
+            else
+            {
+
+                for (var row in ripplePoints)
+                {
+                    for (var point in row)
+                    {
+                        addDebugPoint(context, point, DebugColor.MAGENTA); // for when the points are in a list of lists
+                    }
+                }
+            }
+        }
+
+    });
+
+
+/**
+ * Gets a distance measurement with an eye toward regen speed, by first checking if the side1 is a single point, and if so, calculating the distance with math, not a function. If it's not a vector, this function calls parasolid directly using the @evDistance() function, which will skip some other handling used in evDistance(). This function also strips out units and adds them back instead of performing math or functions on valueWithUnits.
+ *
+ * @param context {Context}
+ * @param arg {{
+ *   @field side0 : If a query is passed in, uses @evDistance(). If a unitless vector is passed in, use math, then multiply by meter.
+ *  @field side0IsPoint {Boolean} : Should be `true` if side 1 contains only one point query, and `false` otherwise.
+ *   @field side1 {Vector} : A vector to measure from.
+ * }}
+ */
+function getDistanceForRipples(context is Context, arg is map) returns ValueWithUnits
+{
+    if (arg.side0IsPoint)
+    {
+        return pointDistance(arg.side0, arg.side1);
+    }
+    else
+    {
+        return @evDistance(context, {
+                            "side0" : arg.side0,
+                            "side1" : arg.side1,
+                            "arcLengthParameterization" : false
+                        }).distance * meter;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////// ↓↓↓ Thanks Jacob_Corder! https://forum.onshape.com/discussion/comment/89006#Comment_89006 ↓↓↓ //////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+ * Much faster than norm as this removes the units which is 5x faster
+ */
+function pointDistance(vec0, vec1) returns ValueWithUnits
+{
+    if (vec0[0] is ValueWithUnits)
+        vec0 = removeVectorUnitsReturnArray3D(vec0);
+    if (vec1[0] is ValueWithUnits)
+        vec1 = removeVectorUnitsReturnArray3D(vec1);
+    return point3DDistanceFast(vec0, vec1) * meter;
+}
+
+function point3DDistanceFast(vec0, vec1)
+{
+    vec0[0] -= vec1[0];
+    vec0[1] -= vec1[1];
+    vec0[2] -= vec1[2];
+    return @sqrt(vec0[0] * vec0[0] + vec0[1] * vec0[1] + vec0[2] * vec0[2]);
+    // returns a point with units if vec0 and vec1 have units. returns number if no units
+}
+
+function removeVectorUnitsReturnArray3D(vec) returns array
+{
+    return [vec[0].value, vec[1].value, vec[2].value];
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////// ↑↑↑ Thanks Jacob_Corder! https://forum.onshape.com/discussion/comment/89006#Comment_89006 ↑↑↑ //////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export function isOdd(num is number) returns boolean
+{
+    return num % 2 != 0;
+}
+
+export function getRippleFacePlanes(context is Context, id is Id, definition is map) returns map
+{
+    var result = {};
+    
+    const facePeriodicity = evFacePeriodicity(context, {"face" : definition.face});
+
+    const isUPeriodic = facePeriodicity[0];
+    const uStep = 1 / (definition.uCount - 1);
+    const uCount = isUPeriodic ? definition.uCount - 1 : definition.uCount;
+
+    const isVPeriodic = facePeriodicity[1];
+    const vStep = 1 / (definition.vCount - 1);
+    const vCount = isVPeriodic ? definition.vCount - 1 : definition.vCount;
+
+    // getting all of the planes ahead of time with evFaceTangentPlanes() is faster than using evFaceTangentPlane() in the nested loops
+    var parameters = [];
+    for (var u = 0; u < definition.uCount; u += 1)
+    {
+        for (var v = 0; v < definition.vCount; v += 1)
+        {
+            parameters = append(parameters, vector(uStep * u, vStep * v));
+        }
+    }
+
+    result.facePlanes = evFaceTangentPlanes(context, {
+                "face" : definition.face,
+                "parameters" : parameters
+            });
+
+
+    if (!isQueryEmpty(context, definition.proxyFace))
+    {
+        result.proxyFacePlanes = evFaceTangentPlanes(context, {
+                    "face" : definition.proxyFace,
+                    "parameters" : parameters
+                });
+    }
+
+    return result;
+}
+
+export function getRippleDistances(context is Context, id is Id, definition is map, rippleFacePlanes is array) returns array
+{
+    // const approxFace = evApproximateBSplineSurface(context, { "face" : definition.face }).bSplineSurface; // used to tell which directions should be periodic
+    const facePeriodicity = evFacePeriodicity(context, {"face" : definition.face});
+    const isUPeriodic = facePeriodicity[0];
+    const isVPeriodic = facePeriodicity[1];
+    
+    var rippleDistances = [];
+
+    for (var u = 0; u < definition.uCount; u += 1)
+    {
+        var vPoints = [];
+        var vDistances = [];
+        for (var v = 0; v < definition.vCount; v += 1)
+        {
+            var samplePlane = rippleFacePlanes[(definition.vCount * u) + v];
+
+
+            var pointDist = 0 * meter;
+            // used to freeze the edges so the new surface lines up with the old one-ish.
+            var isBorder = ((u == 0 || u == definition.uCount - 1) && !isUPeriodic) || ((v == 0 || v == definition.vCount - 1) && !isVPeriodic);
+
+            if (!isBorder)
+            {
+                // could use later maybe to freeze more border points for a shot at maintaining something closer to tangency with surrounding geometry
+                // var is2ndBorder = ((u == 1 || u == definition.uCount - 2) && !isUPeriodic) || ((v == 1 || v == definition.vCount - 2) && !isVPeriodic);
+
+                var dampingFactor = 1;
+                for (var mods in definition.mods)
+                {
+
+                    const objects = mods.modObjects;
+                    const rangeStart = mods.dampingRangeStart;
+                    const rangeEnd = mods.dampingRange + mods.dampingRangeStart;
+                    const nearFactor = mods.dampingNearFactor;
+                    const farFactor = mods.dampingFarFactor;
+                    const distance = clamp(evDistance(context, { "side0" : objects, "side1" : samplePlane.origin }).distance, rangeStart, rangeEnd);
+                    const rangeFactor = remap(distance, rangeStart, rangeEnd, nearFactor, farFactor);
+                    const rangeFactorToWave = easeLinearRange(rangeFactor);
+
+                    dampingFactor *= rangeFactorToWave;
+                }
+
+                if (definition.creationType == TextureCreationType.Pattern)
+                {
+                    var distance;
+                    var goUp;
+                    if (definition.texturePreset == TexturePresetType.Bumps)
+                        goUp = definition.swapPattern ? isOdd(u + v) : !isOdd(u + v);
+
+
+                    else if (definition.texturePreset == TexturePresetType.Lines)
+                        goUp = definition.swapPattern ? isOdd(u) : isOdd(v);
+
+                    distance = goUp ? definition.patternAmplitude / 2 + (definition.shift * definition.patternAmplitude / 2) : -definition.patternAmplitude / 2 + (definition.shift * definition.patternAmplitude / 2);
+                    pointDist = distance * dampingFactor;
+                }
+
+                if (definition.creationType == TextureCreationType.Splash)
+                {
+                    for (var attractor in definition.splash)
+                    {
+                        const objects = attractor.splashObjects;
+
+                        // is there only one item, and is it a point?
+                        const objectArray = evaluateQuery(context, objects);
+                        const isPoint = size(objectArray) == 1 && !isQueryEmpty(context, qEntityFilter(objectArray[0], EntityType.VERTEX));
+                        const side0 = isPoint ? evVertexPoint(context, { "vertex" : objectArray[0] }) : objects;
+
+                        const amplitude = attractor.splashAmplitude;
+                        const frequency = attractor.splashFrequency;
+                        const range = attractor.splashRange;
+                        const distance = getDistanceForRipples(context, { "side0" : side0, "side0IsPoint" : isPoint, "side1" : samplePlane.origin });
+                        const rangeFactor = tolerantEquals(range, 0 * meter) ? 1 : remap(min(distance, range), 0 * meter, range, 1, 0); // if the range is set to zero make the range infinite.
+                        const rangeFactorToWave = easeLinearRange(rangeFactor);
+
+                        const phaseShift = attractor.splashFlip ? 0 * meter : frequency / 2;
+
+                        const waveSetup = cos((distance - phaseShift) * (360 * degree / frequency));
+
+                        pointDist += (-(amplitude / 2 * waveSetup) + amplitude / 2 * definition.shift) * rangeFactorToWave * dampingFactor;
+                    }
+                }
+            }
+
+            vDistances = append(vDistances, pointDist);
+
+        }
+        rippleDistances = append(rippleDistances, vDistances);
+    }
+
+    return rippleDistances;
+}
+
+export function getRipplePoints(context is Context, id is Id, definition is map, rippleFacePlanes is array, rippleDistances is array) returns array
+{
+    var points = [];
+
+    for (var u = 0; u < definition.uCount; u += 1)
+    {
+        var vPoints = [];
+        for (var v = 0; v < definition.vCount; v += 1)
+        {
+            const samplePlane = rippleFacePlanes[(definition.vCount * u) + v];
+            const distance = rippleDistances[u][v];
+            vPoints = append(vPoints, samplePlane.origin + samplePlane.normal * distance);
+        }
+        points = append(points, vPoints);
+    }
+    return points;
+}
+
+export function ripplesEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (definition.cacheMode)
+    {
+        const useProxyFace = !isQueryEmpty(context, definition.proxyFace);
+
+        const rippleFacePlanes = getRippleFacePlanes(context, id, definition).facePlanes;
+
+        var planesToMeasure = rippleFacePlanes;
+
+        if (useProxyFace)
+        {
+            planesToMeasure = getRippleFacePlanes(context, id, definition).proxyFacePlanes;
+        }
+
+        const approxFace = evApproximateBSplineSurface(context, { "face" : definition.face }).bSplineSurface;
+        definition.uCount = approxFace.isUPeriodic ? definition.uCount - 1 : definition.uCount;
+        definition.vCount = approxFace.isVPeriodic ? definition.vCount - 1 : definition.vCount;
+        definition.cachedDistances = getRippleDistances(context, id, definition, planesToMeasure);
+        if (definition.cacheType == CacheType.Distances)
+        {
+            return definition;
+        }
+        else if (definition.cacheType == CacheType.Points)
+        {
+            definition.cachedPoints = getRipplePoints(context, id, definition, rippleFacePlanes, definition.cachedDistances);
+            return definition;
+        }
+    }
+    return definition;
+}
+
+export function fixVectorArrayFromEditingLogic(points is array, uCount is number, vCount is number) returns array
+{
+    var newpPoints = [];
+    for (var u = 0; u < uCount; u += 1)
+    {
+        var vPoints = [];
+        for (var v = 0; v < vCount; v += 1)
+        {
+            vPoints = append(vPoints, vector(points[u][v][0], points[u][v][1], points[u][v][2]));
+        }
+        newpPoints = append(newpPoints, vPoints);
+    }
+    return newpPoints;
+}
