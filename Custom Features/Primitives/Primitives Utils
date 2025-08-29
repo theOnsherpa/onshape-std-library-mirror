@@ -1,0 +1,686 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1560;
+import(path : "onshape/std/geometry.fs", version : "1560.0");
+
+Xpositive::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/de4fb06f7528b840ac85474d", version : "0d35be08c19a85e08512f620");
+Xnegative::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/0d12b464454988b7ac260d06", version : "3523b46b9673436fee7daad2");
+Ypositive::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/ccc7fcee8b53c2e8c81b945f", version : "0bbb348426e986d513feb516");
+Ynegative::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/3772ad208ac8cadd603b0814", version : "0fb00422cfe6e4bc17ba3ecb");
+Zpositive::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/840daeefecd01e44e872014b", version : "67bdad569305eb95b70b0428");
+Znegative::import(path : "fe4a6c14fdcb9acbe044fba9/3ba62ee8ddf3b3b64cde1b80/64c5c0ffd8ff995fca75734e", version : "5cfe5cd87c8f433e0d89d49b");
+endDepth::import(path : "d80fd42d5b467210c5f77364", version : "fb6abac17e9d1b6dd1a8d511");
+startDepth::import(path : "17d59c59b9d9c6ddcbe4e6a9", version : "8ced6767bb27c85446f237ee");
+endDia::import(path : "130f6a16b7d37e105f7b6ed1", version : "96d219c9cfa9451e01a53a41");
+startDia::import(path : "8b33d8734ae39b4ce088c5ba", version : "aa206d233cdf145261992544");
+linkedDepth::import(path : "9d58b6033f5112aaa633f37b", version : "8fd1a0206736ffa4780b3a7e");
+linkedDia::import(path : "9a6c2d05e178c8d46082a6a4", version : "f702351155d5f516671e4cc1");
+
+
+const primitiveSize = 50;
+export const PRIMITIVE_BOUNDS = { (millimeter) : [0, primitiveSize, 1000000] } as LengthBoundSpec;
+export const PRIMITIVE_SYMMETRICAL_BOUNDS = { (millimeter) : [-100000, primitiveSize / 2, 1000000] } as LengthBoundSpec;
+export const PRIMITIVE_SYMMETRICAL_BOUNDS_ZERO_DEFAULT = { (millimeter) : [-100000, 0 / 2, 1000000] } as LengthBoundSpec;
+
+
+export function getSelectionCsys(context is Context, vertex is Query)
+{
+    var cSys;
+    try silent
+    {
+        cSys = evMateConnector(context, {
+                    "mateConnector" : vertex
+                });
+    }
+    catch (error)
+    {
+        cSys = coordSystem(evVertexPoint(context, { "vertex" : vertex }), X_DIRECTION, Z_DIRECTION);
+    }
+
+    return cSys;
+}
+
+export function getTransform(context is Context, vertex is Query)
+{
+    var cSys = getSelectionCsys(context, vertex);
+    var transforms = toWorld(cSys);
+
+    return transforms;
+}
+
+export function isOriginSelected(context is Context, selections is Query)
+{
+    var originBool = isQueryEmpty(context, selections) || !isQueryEmpty(context, qIntersection([selections, qCreatedBy(makeId("OriginTest"))]));
+    return originBool;
+}
+
+
+export function sixDirectionalPrimitiveEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    var newManipulators;
+
+    // if a value from uniform mode is changed
+
+    if (definition.uniform)
+    {
+        if (oldDefinition.size != definition.size)
+        {
+            definition = uniformChanged(definition);
+            return definition;
+        }
+    }
+
+
+    // Putting all of the params to make comparrisons easier to type and read later
+    var oldCenteredParams = [oldDefinition.X, oldDefinition.Y, oldDefinition.Z];
+    var oldNonUniformParams = [oldDefinition.Xpos, oldDefinition.Ypos, oldDefinition.Zpos, oldDefinition.Xneg, oldDefinition.Yneg, oldDefinition.Zneg];
+    var centeredParams = [definition.X, definition.Y, definition.Z];
+    var nonUniformParams = [definition.Xpos, definition.Ypos, definition.Zpos, definition.Xneg, definition.Yneg, definition.Zneg];
+
+    if (!definition.uniform && definition.centered)
+    {
+
+        // if a value from centered mode is changed
+        if (oldCenteredParams != centeredParams)
+        {
+            definition = centeredChanged(definition);
+            return definition;
+        }
+    }
+
+    if ((!definition.uniform && !definition.centered))
+    {
+        // if a value from non uniform mode is changed
+        if (oldNonUniformParams != nonUniformParams)
+        {
+            definition = nonUniformChanged(definition);
+            return definition;
+        }
+    }
+}
+
+export function manipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+
+    if (newManipulators["uniformManip"] is map)
+    {
+        definition.size = newManipulators["uniformManip"].offset * 2;
+        definition = uniformChanged(definition);
+    }
+
+    if (newManipulators["centeredXManip"] is map)
+    {
+        definition.X = newManipulators["centeredXManip"].offset * 2;
+        definition = centeredChanged(definition);
+    }
+
+    if (newManipulators["centeredYManip"] is map)
+    {
+        definition.Y = newManipulators["centeredYManip"].offset * 2;
+        definition = centeredChanged(definition);
+    }
+
+    if (newManipulators["centeredZManip"] is map)
+    {
+        definition.Z = newManipulators["centeredZManip"].offset * 2;
+        definition = centeredChanged(definition);
+    }
+
+    if (newManipulators["xPosManip"] is map)
+    {
+        definition.Xpos = newManipulators["xPosManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    if (newManipulators["xNegManip"] is map)
+    {
+        definition.Xneg = newManipulators["xNegManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    if (newManipulators["yPosManip"] is map)
+    {
+        definition.Ypos = newManipulators["yPosManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    if (newManipulators["yNegManip"] is map)
+    {
+        definition.Yneg = newManipulators["yNegManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    if (newManipulators["zPosManip"] is map)
+    {
+        definition.Zpos = newManipulators["zPosManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    if (newManipulators["zNegManip"] is map)
+    {
+        definition.Zneg = newManipulators["zNegManip"].offset;
+        definition = nonUniformChanged(definition);
+    }
+
+    return definition;
+}
+
+export function uniformChanged(definition is map)
+{
+    var n = definition.size;
+    definition.X = n;
+    definition.Xpos = n / 2;
+    definition.Xneg = n / 2;
+    definition.Y = n;
+    definition.Ypos = n / 2;
+    definition.Yneg = n / 2;
+    definition.Z = n;
+    definition.Zpos = n / 2;
+    definition.Zneg = n / 2;
+
+    return definition;
+}
+
+export function centeredChanged(definition is map)
+{
+    var n = max([definition.X, definition.Y, definition.Zpos]);
+    var nx = definition.X;
+    var ny = definition.Y;
+    var nz = definition.Z;
+
+    definition.size = n;
+    definition.Xpos = nx / 2;
+    definition.Xneg = nx / 2;
+    definition.Ypos = ny / 2;
+    definition.Yneg = ny / 2;
+    definition.Zpos = nz / 2;
+    definition.Zneg = nz / 2;
+
+    return definition;
+}
+
+export function nonUniformChanged(definition is map)
+{
+    // sets uniform size to biggest dimension
+    definition.size = max([definition.Xpos + definition.Xneg, definition.Ypos + definition.Yneg, definition.Zpos + definition.Zneg]);
+
+    // sets centered sizes to equal the length of each direction, but centered
+    definition.X = definition.Xpos + definition.Xneg;
+    definition.Y = definition.Ypos + definition.Yneg;
+    definition.Z = definition.Zpos + definition.Zneg;
+
+    return definition;
+}
+
+export predicate sixSidedPredicate(definition is map)
+{
+    booleanStepTypePredicate(definition);
+
+    annotation { "Name" : "Center(s)", "Filter" : QueryFilterCompound.ALLOWS_VERTEX }
+    definition.locations is Query;
+
+    annotation { "Name" : "Uniform", "Default" : true }
+    definition.uniform is boolean;
+
+    if (definition.uniform)
+    {
+        annotation { "Name" : "Size" }
+        isLength(definition.size, PRIMITIVE_BOUNDS);
+    }
+
+    else
+    {
+        annotation { "Name" : "Centered", "Default" : true }
+        definition.centered is boolean;
+
+        if (definition.centered)
+        {
+            annotation { "Name" : "X length", "Icon" : Xpositive::BLOB_DATA }
+            isLength(definition.X, PRIMITIVE_BOUNDS);
+
+            annotation { "Name" : "Y length", "Icon" : Ypositive::BLOB_DATA }
+            isLength(definition.Y, PRIMITIVE_BOUNDS);
+
+            annotation { "Name" : "Z length", "Icon" : Zpositive::BLOB_DATA }
+            isLength(definition.Z, PRIMITIVE_BOUNDS);
+        }
+
+        else
+        {
+            annotation { "Name" : "X+", "Icon" : Xpositive::BLOB_DATA }
+            isLength(definition.Xpos, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+            annotation { "Name" : "X-", "Icon" : Xnegative::BLOB_DATA }
+            isLength(definition.Xneg, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+            annotation { "Name" : "Y+", "Icon" : Ypositive::BLOB_DATA }
+            isLength(definition.Ypos, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+            annotation { "Name" : "Y-", "Icon" : Ynegative::BLOB_DATA }
+            isLength(definition.Yneg, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+            annotation { "Name" : "Z+", "Icon" : Zpositive::BLOB_DATA }
+            isLength(definition.Zpos, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+            annotation { "Name" : "Z-", "Icon" : Znegative::BLOB_DATA }
+            isLength(definition.Zneg, PRIMITIVE_SYMMETRICAL_BOUNDS);
+        }
+
+        annotation { "Name" : "Show coordinate system", "Default" : true }
+        definition.showCoord is boolean;
+
+    }
+
+    booleanStepScopePredicate(definition);
+}
+
+export function sixSidedSizes(definition)
+{
+    var Xpos;
+    var Xneg;
+    var Ypos;
+    var Yneg;
+    var Zpos;
+    var Zneg;
+
+    if (definition.uniform)
+    {
+        Xpos = definition.size / 2;
+        Xneg = -definition.size / 2;
+        Ypos = definition.size / 2;
+        Yneg = -definition.size / 2;
+        Zpos = definition.size / 2;
+        Zneg = -definition.size / 2;
+    }
+    else
+    {
+        if (definition.centered)
+        {
+            Xpos = definition.X / 2;
+            Xneg = -definition.X / 2;
+            Ypos = definition.Y / 2;
+            Yneg = -definition.Y / 2;
+            Zpos = definition.Z / 2;
+            Zneg = -definition.Z / 2;
+        }
+        else
+        {
+            Xpos = definition.Xpos;
+            Xneg = -definition.Xneg;
+            Ypos = definition.Ypos;
+            Yneg = -definition.Yneg;
+            Zpos = definition.Zpos;
+            Zneg = -definition.Zneg;
+        }
+    }
+    var values = { "Xpos" : Xpos, "Xneg" : Xneg, "Ypos" : Ypos, "Yneg" : Yneg, "Zpos" : Zpos, "Zneg" : Zneg };
+    return values;
+}
+
+export function displayCsys(context is Context, definition is map)
+{
+    var Csys = getManipCsys(definition, context);
+    var length = sixSidedSizes(definition);
+    var coordTransform = transform(plane(WORLD_COORD_SYSTEM), plane(Csys));
+    var xVec = coordTransform * vector(length.Xpos, 0 * inch, 0 * inch);
+    var yVec = coordTransform * vector(0 * inch, length.Ypos, 0 * inch);
+    var zVec = coordTransform * vector(0 * inch, 0 * inch, length.Zpos);
+    addDebugArrow(context, Csys.origin, xVec, 0 * inch, DebugColor.RED);
+    addDebugArrow(context, Csys.origin, yVec, 0 * inch, DebugColor.GREEN);
+    addDebugArrow(context, Csys.origin, zVec, 0 * inch, DebugColor.BLUE);
+    // addDebugPoint(context, Csys.origin, DebugColor.BLACK);
+}
+
+export function getManipCsys(definition is map, context is Context)
+{
+    var manipCsys;
+    if (isQueryEmpty(context, definition.locations)) /*if nothing is selected*/
+    {
+        manipCsys = WORLD_COORD_SYSTEM;
+    }
+    else
+    {
+        manipCsys = getSelectionCsys(context, evaluateQuery(context, definition.locations)[0]);
+    }
+
+    return manipCsys;
+}
+
+export function createSixSidedManips(definition is map, context is Context, id is Id)
+{
+    var manipCsys = getManipCsys(definition, context);
+    // manipulator variables
+    var base = manipCsys.origin;
+
+    if (definition.uniform)
+    {
+        var uniformManip = linearManipulator({
+                "base" : base,
+                "direction" : manipCsys.zAxis,
+                "offset" : definition.size / 2
+            });
+
+        addManipulators(context, id, { "uniformManip" : uniformManip });
+    }
+    else
+    {
+        if (definition.centered)
+        {
+
+            var centeredXManip = linearManipulator({
+                    "base" : base,
+                    "direction" : manipCsys.xAxis,
+                    "offset" : definition.X / 2
+                });
+
+            var centeredYManip = linearManipulator({
+                    "base" : base,
+                    "direction" : yAxis(manipCsys),
+                    "offset" : definition.Y / 2
+                });
+
+            var centeredZManip = linearManipulator({
+                    "base" : base,
+                    "direction" : manipCsys.zAxis,
+                    "offset" : definition.Z / 2
+                });
+
+            addManipulators(context, id, { "centeredXManip" : centeredXManip, "centeredYManip" : centeredYManip, "centeredZManip" : centeredZManip });
+        }
+        else
+        {
+
+            var xPosManip = linearManipulator({
+                    "base" : base,
+                    "direction" : manipCsys.xAxis,
+                    "offset" : definition.Xpos
+                });
+
+            var xNegManip = linearManipulator({
+                    "base" : base,
+                    "direction" : -manipCsys.xAxis,
+                    "offset" : definition.Xneg,
+                    "style" : ManipulatorStyleEnum.SECONDARY
+                });
+
+            var yPosManip = linearManipulator({
+                    "base" : base,
+                    "direction" : yAxis(manipCsys),
+                    "offset" : definition.Ypos
+                });
+
+            var yNegManip = linearManipulator({
+                    "base" : base,
+                    "direction" : -yAxis(manipCsys),
+                    "offset" : definition.Yneg,
+                    "style" : ManipulatorStyleEnum.SECONDARY
+                });
+
+            var zPosManip = linearManipulator({
+                    "base" : base,
+                    "direction" : manipCsys.zAxis,
+                    "offset" : definition.Zpos
+                });
+
+            var zNegManip = linearManipulator({
+                    "base" : base,
+                    "direction" : -manipCsys.zAxis,
+                    "offset" : definition.Zneg,
+                    "style" : ManipulatorStyleEnum.SECONDARY
+                });
+
+            addManipulators(context, id, { "xPosManip" : xPosManip, "xNegManip" : xNegManip, "yPosManip" : yPosManip, "yNegManip" : yNegManip, "zPosManip" : zPosManip, "zNegManip" : zNegManip });
+
+            return definition;
+        }
+    }
+}
+
+export predicate twoEndedPrimitivePredicate(definition is map)
+{
+    booleanStepTypePredicate(definition);
+
+    annotation { "Name" : "Center(s)", "Filter" : QueryFilterCompound.ALLOWS_VERTEX }
+    definition.locations is Query;
+
+    if (definition.isPrism)
+    {
+        annotation { "Name" : "Sides" }
+        isInteger(definition.sides, { (unitless) : [3, 6, 100000] } as IntegerBoundSpec);
+
+    }
+    annotation { "Name" : "Link diameters" }
+    definition.linkDiameters is boolean;
+
+    if (definition.linkDiameters)
+    {
+        annotation { "Name" : "Diameter", "Icon" : linkedDia::BLOB_DATA }
+        isLength(definition.linkedDia, PRIMITIVE_BOUNDS);
+    }
+    else
+    {
+        annotation { "Name" : "Start Diameter", "Icon" : endDia::BLOB_DATA }
+        isLength(definition.end1Dia, PRIMITIVE_BOUNDS);
+
+        annotation { "Name" : "End Diameter", "Icon" : startDia::BLOB_DATA }
+        isLength(definition.end2Dia, PRIMITIVE_BOUNDS);
+    }
+
+    annotation { "Name" : "Link depths" }
+    definition.linkDepths is boolean;
+
+    if (definition.linkDepths)
+    {
+        annotation { "Name" : "Depth", "Icon" : linkedDepth::BLOB_DATA }
+        isLength(definition.linkedLength, PRIMITIVE_SYMMETRICAL_BOUNDS);
+    }
+    else
+    {
+        annotation { "Name" : "Start Depth", "Icon" : endDepth::BLOB_DATA }
+        isLength(definition.dir1Length, PRIMITIVE_SYMMETRICAL_BOUNDS);
+
+        annotation { "Name" : "End Depth", "Icon" : startDepth::BLOB_DATA }
+        isLength(definition.dir2Length, PRIMITIVE_SYMMETRICAL_BOUNDS_ZERO_DEFAULT);
+    }
+
+
+
+    booleanStepScopePredicate(definition);
+}
+
+export function twoEndedPrimitiveManipulators(context is Context, id is Id, definition is map)
+{
+    var manipCsys;
+
+    if (isQueryEmpty(context, definition.locations))
+    {
+        manipCsys = WORLD_COORD_SYSTEM;
+    }
+    else
+    {
+        manipCsys = getSelectionCsys(context, evaluateQuery(context, definition.locations)[0]);
+    }
+
+    var linearManip1Direction = manipCsys.zAxis;
+    var linearManip1Offset = definition.dir1Length;
+    var linearManip2Direction = -manipCsys.zAxis;
+    var linearManip2Offset = definition.dir2Length;
+    var endManip1Origin = manipCsys.origin + (manipCsys.zAxis * definition.dir1Length);
+    var endManip1Direction = manipCsys.xAxis;
+    var endManip1Offset = definition.end1Dia;
+    var endManip2Origin = manipCsys.origin - (manipCsys.zAxis * definition.dir2Length);
+    var endManip2Direction = manipCsys.xAxis;
+    var endManip2Offset = definition.end2Dia;
+
+    // adding Manipulators
+    var linearManip1 = linearManipulator({
+            "base" : manipCsys.origin,
+            "direction" : linearManip1Direction,
+            "offset" : definition.dir1Length
+        });
+
+    if (!definition.linkDepths)
+    {
+        var linearManip2 = linearManipulator({
+                "base" : manipCsys.origin,
+                "direction" : linearManip2Direction,
+                "offset" : definition.dir2Length,
+                "style" : ManipulatorStyleEnum.SECONDARY
+            });
+
+        addManipulators(context, id, { "linearManip2" : linearManip2 });
+    }
+
+    var endManip1 = linearManipulator({
+            "base" : endManip1Origin,
+            "direction" : endManip1Direction,
+            "offset" : definition.end1Dia / 2,
+            "style" : ManipulatorStyleEnum.TANGENTIAL,
+            "minValue" : 0 * inch
+        });
+
+    if (!definition.linkDiameters)
+    {
+        var endManip2 = linearManipulator({
+                "base" : endManip2Origin,
+                "direction" : endManip2Direction,
+                "offset" : definition.end2Dia / 2,
+                "style" : ManipulatorStyleEnum.TANGENTIAL,
+                "minValue" : 0 * inch
+            });
+
+        addManipulators(context, id, { "endManip2" : endManip2 });
+    }
+
+    addManipulators(context, id, {
+                "linearManip1" : linearManip1,
+                "endManip1" : endManip1
+            });
+}
+
+export function twoEndedManipulatorFunction(context is Context, definition is map, newManipulators is map) returns map
+{
+
+    if (newManipulators["linearManip1"] is map)
+    {
+        definition.dir1Length = newManipulators["linearManip1"].offset;
+        definition.linkedLength = newManipulators["linearManip1"].offset;
+        if (definition.linkDepths)
+        {
+            definition.dir2Length = definition.dir1Length;
+        }
+    }
+
+    if (newManipulators["linearManip2"] is map)
+    {
+        definition.dir2Length = newManipulators["linearManip2"].offset;
+    }
+
+    if (newManipulators["endManip1"] is map)
+    {
+        definition.end1Dia = newManipulators["endManip1"].offset * 2;
+        definition.linkedDia = newManipulators["endManip1"].offset * 2;
+        if (definition.linkDiameters)
+        {
+            definition.end2Dia = definition.end1Dia;
+        }
+    }
+
+    if (newManipulators["endManip2"] is map)
+    {
+        definition.end2Dia = newManipulators["endManip2"].offset * 2;
+        if (definition.linkDiameters)
+        {
+            definition.end1Dia = definition.end2Dia;
+        }
+    }
+
+    return definition;
+}
+
+export function twoEndedPrimitiveEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    if (definition.linkDepths)
+    {
+        // syncing the values of the linked param and non-linked params
+        if (oldDefinition.linkedLength != definition.linkedLength)
+        {
+            definition.dir1Length = definition.linkedLength;
+            definition.dir2Length = definition.linkedLength;
+        }
+    }
+
+    else
+    {
+        // match linked length to direction 1 length
+        if (oldDefinition.dir1Length != definition.dir1Length)
+        {
+            definition.linkedLength = definition.dir1Length;
+        }
+    }
+
+    if (definition.linkDiameters)
+    {
+        // syncing the values of the linked param and non-linked params
+        if (oldDefinition.linkedDia != definition.linkedDia)
+        {
+            definition.end1Dia = definition.linkedDia;
+            definition.end2Dia = definition.linkedDia;
+        }
+    }
+
+    else
+    {
+        // match linked dia to end 1 dia
+        reportFeatureInfo(context, id, "worked!");
+        if (oldDefinition.end1Dia != definition.end1Dia)
+        {
+            definition.linkedDia = definition.end1Dia;
+        }
+    }
+    return definition;
+}
+
+export function getTwoEndedValues(context is Context, id is Id, definition is map)
+{
+    if (definition.linkDepths)
+    {
+        definition.usedLength1 = definition.linkedLength;
+        definition.usedLength2 = definition.linkedLength;
+    }
+    else
+    {
+        definition.usedLength1 = definition.dir1Length;
+        definition.usedLength2 = definition.dir2Length;
+    }
+
+    if (definition.linkDiameters)
+    {
+        definition.usedDia1 = definition.linkedDia;
+        definition.usedDia2 = definition.linkedDia;
+    }
+    else
+    {
+        definition.usedDia1 = definition.end1Dia;
+        definition.usedDia2 = definition.end2Dia;
+    }
+
+    return definition;
+}
+
+/**
+ * A `LengthBoundSpec` for a length strictly greater than 0.
+ */
+export const TORUS_MAJOR_RADIUS_BOUNDS =
+{
+    (meter)      : [1e-5, 0.025*2, 500],
+    (centimeter) : 2.5*2,
+    (millimeter) : 25.0*2,
+    (inch)       : 1.0*2,
+    (foot)       : 0.1*2,
+    (yard)       : 0.025*2
+} as LengthBoundSpec;
+
