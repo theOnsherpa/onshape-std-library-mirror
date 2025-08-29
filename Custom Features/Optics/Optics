@@ -1,0 +1,1206 @@
+
+
+//_______________________________________________________________________________________________________________________________________________
+//
+// This FeatureScript is owned and is distributed by Evan Reese.
+// You may not redistribute it for commercial purposes without the permission of Evan Reese.
+// Copyright (c) 2024 Evan Reese.
+// Disclaimer: While I've done my best to make the feature accurate, it could produce erroneous results. This feature is are distributed 'as is' without any warranty, expressed or implied. For use in critical applications it is recommended to verify the feature results by another method.
+//_______________________________________________________________________________________________________________________________________________
+
+//_______________________________________________________________________________________________________________________________________________
+// Thanks to:
+// --- Joshua Newth for code review, and generously patient education in best practices (even if I won't use some of them until my next feature).
+// --- Alex Kempen for some code review, tweaks, and all around good feedback.
+// --- Maxamillion Schommer for writing the original Ray Tracer feature, which was an inspiration and reference (though no code was directly used).
+// _______________________________________________________________________________________________________________________________________________
+
+FeatureScript 2130;
+import(path : "onshape/std/common.fs", version : "2130.0");
+export import(path : "82d5fe4033a3c7e35dc757f3", version : "9a2d5d5e456fb4783b72414b");
+export import(path : "9f4c9835d8018ff7dbdb5683/c7e6c3cab654dc85a951c1a4/f937aebd788e8d724a4de67b", version : "1e843593890adcd0071cee82");
+export import(path : "9f4c9835d8018ff7dbdb5683/3584e597d32560ee4efa9f0f/c60f4a6e12f07acee647a2a1", version : "1cf490b478823266869ac18b");
+export import(path : "9f4c9835d8018ff7dbdb5683/3584e597d32560ee4efa9f0f/c6e1bb9b94eaf2001e2b9467", version : "ffb410215c2bf8fab0226c10");
+descriptionImage::import(path : "3ee6b2a18a444d1d22954d54", version : "1420c66e8a627b82895ceadf");
+icon::import(path : "373651d1fca1d2e26f0f726d", version : "5d191c80c8945601acd4d4e3");
+
+annotation { "Feature Type Name" : "Optics",
+        "Feature Name Template" : "#name#percent",
+        "Editing Logic Function" : "opticsEditingLogic",
+        "Feature Type Description" : "Simulates the interaction of light rays and objects to help in designing optical parts like lenses, reflectors, and light guides.",
+        "Description Image" : descriptionImage::BLOB_DATA,
+        "Icon" : icon::BLOB_DATA }
+export const ovylOptics = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Feature name", "Default" : "Optics" }
+        definition.name is string;
+
+        annotation { "Name" : "Ray count", "UIHint" : UIHint.READ_ONLY, "Description" : "The total number of rays created. Aim to minimize this number for performance." }
+        isInteger(definition.rayCountPreview, { (unitless) : [1, 1, 1e6] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Menu", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.mode is opticsFeatureMenu;
+        if (definition.mode == opticsFeatureMenu.Emitters)
+        {
+            annotation { "Name" : "Emitter mode", "UIHint" : UIHint.HORIZONTAL_ENUM }
+            definition.emitterMode is EmitterMode;
+
+            if (definition.emitterMode == EmitterMode.Point)
+            {
+                annotation { "Name" : "Point emitters", "Filter" : BodyType.MATE_CONNECTOR, "Description" : "Choose individual emitters." }
+                definition.pointEmitters is Query;
+            }
+
+            if (definition.emitterMode == EmitterMode.Curve)
+            {
+                annotation { "Name" : "Curve emitters", "Filter" : EntityType.EDGE, "Description" : "Array emitters on a curve or chain of curves" }
+                definition.curveEmitters is Query;
+            }
+
+            if (definition.emitterMode == EmitterMode.Area)
+            {
+                annotation { "Name" : "Area emitter", "Filter" : EntityType.FACE, "MaxNumberOfPicks" : 1, "Description" : "Array emitters on a face" }
+                definition.faceEmitter is Query;
+            }
+            annotation { "Name" : "Flip direction", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+            definition.flipDirection is boolean;
+
+            annotation { "Name" : "Direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+            definition.direction is Query;
+
+            if (definition.emitterMode == EmitterMode.Curve)
+            {
+                annotation { "Name" : "Emitter count" }
+                isInteger(definition.curveEmitterCount, { (unitless) : [1, 3, 1e5] } as IntegerBoundSpec);
+            }
+
+            if (definition.emitterMode == EmitterMode.Area)
+            {
+                annotation { "Name" : "U emitter count" }
+                isInteger(definition.uCount, { (unitless) : [1, 3, 1e5] } as IntegerBoundSpec);
+
+                annotation { "Name" : "V emitter count" }
+                isInteger(definition.vCount, { (unitless) : [1, 3, 1e5] } as IntegerBoundSpec);
+            }
+
+        }
+        if (definition.mode == opticsFeatureMenu.Parts)
+        {
+            annotation { "Group Name" : "Parts", "Collapsed By Default" : false }
+            {
+                annotation { "Name" : "Parts",
+                            "Item name" : "Part",
+                            "Driven query" : "entities",
+                            "Item label template" : "#entities",
+                            "Description" : "Parts for light rays to interact with",
+                            "UIHint" : UIHint.FOCUS_INNER_QUERY }
+                definition.parts is array;
+                for (var part in definition.parts)
+                {
+                    annotation { "Name" : "Entities", "Filter" : EntityType.BODY && BodyType.SOLID }
+                    part.entities is Query;
+
+                    annotation { "Name" : "Bounce type" }
+                    part.bounceType is RayTracerObjectBounceType;
+
+                    if (part.bounceType == RayTracerObjectBounceType.Transparent)
+                    {
+                        annotation { "Name" : "Index of refraction",
+                                    "Description" : "Defaults to the index of polycarbonate, which is 1.6." }
+                        isReal(part.index, { (unitless) : [1e-6, 1.6, 1e6] } as RealBoundSpec);
+                    }
+
+                }
+                annotation { "Name" : "Medium index", "Description" : "The index of the medium around all of the parts, which is usually air. The value defaults to the index of air, which is 1.00027717. 1 is a perfect vacuum." }
+                isReal(definition.mediumIndex, { (unitless) : [1, 1.00027717, 1e6] } as RealBoundSpec);
+            }
+
+            annotation { "Group Name" : "Face settings", "Collapsed By Default" : false }
+            {
+                annotation { "Name" : "Faces (optional)",
+                            "Item name" : "Face",
+                            "Driven query" : "faces",
+                            "Item label template" : "#faces",
+                            "Description" : "Faces to add roughness to. This allows for simulation of surfaces that scatter light. For example, the rough tip of a light pipe meant to diffuse the output. All other faces are treated as polished.",
+                            "UIHint" : UIHint.FOCUS_INNER_QUERY }
+                definition.faceSettings is array;
+                for (var face in definition.faceSettings)
+                {
+                    annotation { "Name" : "Faces", "Filter" : EntityType.FACE && ConstructionObject.NO && SketchObject.NO }
+                    face.faces is Query;
+
+                    // annotation { "Name" : "Bounce type" } //TODO add bounce type to face overrides so a clear part could have a mirrored or painted surface etc
+                    // face.faceBounceType is RayTracerObjectBounceType;
+
+                    annotation { "Name" : "Roughness", "Description" : roughnessDescription }
+                    isReal(face.roughness, ZERO_DEFAULT_ROUGHNESS_BOUNDS);
+                }
+
+                annotation { "Name" : "Roughness seed", "Description" : roughnessSeedDescription }
+                isInteger(definition.roughnessSeed, POSITIVE_COUNT_BOUNDS);
+            }
+        }
+        if (definition.mode == opticsFeatureMenu.Rays)
+        {
+            annotation { "Group Name" : "Shape and count", "Collapsed By Default" : false }
+            {
+                annotation { "Name" : "Shape", "UIHint" : UIHint.SHOW_LABEL, "Default" : EmitterShape.FAN }
+                definition.emitterShape is EmitterShape;
+
+                annotation { "Name" : "Viewing angle", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                isAngle(definition.throwAngle, { (degree) : [0, 90, 360] } as AngleBoundSpec);
+
+                if (definition.emitterShape == EmitterShape.FAN)
+                {
+                    annotation { "Name" : "Count", "Description" : "The number of rays per emitter." }
+                    isInteger(definition.fanRayCount, { (unitless) : [1, 1, 1e6] } as IntegerBoundSpec);
+                }
+
+                if (definition.emitterShape == EmitterShape.CONE_STRUCTURED)
+                {
+                    annotation { "Name" : "Density", "Description" : "The number of ray 'rings' around the central ray (each ring has 6 more rays than the one before it)." }
+                    isInteger(definition.coneRayDensity, { (unitless) : [1, 2, 1e6] } as IntegerBoundSpec);
+
+                }
+
+                if (definition.emitterShape == EmitterShape.CONE_RANDOM)
+                {
+                    annotation { "Name" : "Count", "Description" : "The number of rays per emitter." }
+                    isInteger(definition.coneRayCount, { (unitless) : [1, 7, 1e6] } as IntegerBoundSpec);
+                }
+
+                annotation { "Name" : "Rotation" }
+                isAngle(definition.emitterRotation, { (degree) : [-1e6, 0, 1e6] } as AngleBoundSpec);
+
+                annotation { "Name" : "Flip rotation", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+                definition.flipEmitterRotation is boolean;
+
+                if (definition.emitterShape != EmitterShape.CONE_RANDOM)
+                {
+                    annotation { "Name" : "Roughness", "Description" : roughnessDescription }
+                    isReal(definition.emitterRoughness, ZERO_DEFAULT_ROUGHNESS_BOUNDS);
+                }
+
+                annotation { "Name" : "showEmitterRoughnessSeed", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                definition.showEmitterRoughnessSeed is boolean;
+
+                if (definition.showEmitterRoughnessSeed || definition.emitterShape == EmitterShape.CONE_RANDOM)
+                {
+                    annotation { "Name" : "Seed", "Description" : roughnessSeedDescription }
+                    isInteger(definition.emitterRoughnessSeed, POSITIVE_COUNT_BOUNDS);
+                }
+
+            }
+
+            annotation { "Group Name" : "Output settings", "Collapsed By Default" : false }
+            {
+
+                annotation { "Name" : "Bounces",
+                            "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                            "Description" : "The maximum number of times a ray is allowed to interact (bounce or refract) with the Parts. Too few bounces may mean a ray never completes its path. Too many bounces will make the feature too slow. With no limit, some rays could enter an infinite scenario (like two opposing mirrors)." }
+                isInteger(definition.bounces, { (unitless) : [1, 50, 1e6] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Preview color", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE], "Default" : RayColor.CYAN }
+                definition.rayColor is RayColor;
+
+                annotation { "Name" : "Keep rays", "Default" : false, "Description" : "When checked, will create rays as selectable curves." }
+                definition.keep is boolean;
+
+                if (definition.keep)
+                {
+                    annotation { "Name" : "Group by", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.SHOW_LABEL], "Default" : RayGroupLevel.Rays }
+                    definition.rayGrouping is RayGroupLevel;
+                }
+
+                annotation { "Name" : "Auto-size exit ray",
+                            "Default" : true,
+                            "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                            "Description" : "When checked, the size of the exit ray is sized proportionally to all of the Parts selected, but their length will be less predictable. Uncheck if you want to extend them a known distance, or to use the exit ray as a reference for downstream modeling, or create rays without any parts selected." }
+                definition.autoSize is boolean;
+
+                if (definition.autoSize)
+                {
+                    annotation { "Name" : "Exit ray length factor", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                    isReal(definition.exitRayFactor, { (unitless) : [0, 0.5, 1e6] } as RealBoundSpec);
+                }
+
+                if (!definition.autoSize)
+                {
+                    annotation { "Name" : "Exit ray length", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+                    isLength(definition.exitRayLength, EXIT_LENGTH_BOUNDS);
+                }
+            }
+
+        }
+        if (definition.mode == opticsFeatureMenu.Targets)
+        {
+            annotation { "Name" : "Target faces (optional)",
+                        "Filter" : EntityType.FACE,
+                        "Description" : "When faces are selected, the feature calculates what percent of rays reach the target faces and displays the info. When nothing is selected, the feature should run faster." }
+            definition.targetFaces is Query;
+
+            annotation { "Name" : "Preview rays by target contact", "Default" : true, "Description" : "Overrides the `Preview color` setting and instead highlights rays by whether or not they reach the target entities: Green for a hit, and red for a miss." }
+            definition.colorByTarget is boolean;
+
+            if (definition.colorByTarget)
+            {
+                annotation { "Name" : "Highlight targets", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE, "Default" : true, "Description" : "Highlights target faces and target/ray intersections." }
+                definition.highlightTargetFaces is boolean;
+
+                annotation { "Name" : "Hits", "Default" : true }
+                definition.colorHits is boolean;
+
+                annotation { "Name" : "Misses", "Default" : true }
+                definition.colorMisses is boolean;
+            }
+        }
+
+        // annotation { "Name" : "List result data",
+        //             "Description" : "Prints information to the FeatureScript Notices Panel, including: Total ray count, Emitter count, Rays per emitter, total bounces, % of rays that hit the target."
+        //         }
+        // definition.printData is boolean;
+
+
+    }
+    {
+
+        if (definition.highlightTargetFaces && !isQueryEmpty(context, definition.targetFaces) && definition.colorByTarget) // highlight target faces if needed
+            addDebugEntities(context, definition.targetFaces, DebugColor.GREEN);
+
+        setFeatureComputedParameter(context, id, { "name" : "percent", "value" : "" }); // setting the name to an empty string so it doesn't show a "?" if calculation doesn't reach the percent calculations below
+
+        if (definition.parts == [])
+            reportFeatureWarning(context, id, "No parts selected.");
+
+        if (definition.emitterMode == EmitterMode.Point)
+            verifyNonemptyQuery(context, definition, "pointEmitters", "No emitters selected.");
+
+        if (definition.emitterMode == EmitterMode.Curve)
+        {
+            verifyNonemptyQuery(context, definition, "curveEmitters", "No emitters selected.");
+            verifyNonemptyQuery(context, definition, "direction", "No emitter direction selected.");
+        }
+
+        if (definition.emitterMode == EmitterMode.Area)
+        {
+            verifyNonemptyQuery(context, definition, "faceEmitter", "No emitters selected.");
+        }
+
+        // adding to the definition to pass to other functions later
+        definition.entities = setPartSettings(context, definition);
+
+        definition.facesWithSettings = setRoughnessSettings(context, definition);
+
+        definition.exitRayLength = getExitRayLength(context, definition);
+
+        const emitterCoords = getEmitters(context, definition);
+
+        const rayCount = getRayCount(definition, emitterCoords); // for use finding the percent of rays that hit target faces
+        var hitCount = 0;
+        for (var i, emitterCoord in emitterCoords)
+        {
+            const tracedRays = traceEmitterRays(context, id + i + "emitter", definition, emitterCoord);
+
+            if (tracedRays == {})
+            {
+                reportFeatureWarning(context, id, "One or more emitters are fully contained within an opaque or mirror object and produced no rays.");
+                continue;
+            }
+
+            definition.emitterRoughnessSeed = pseudoRandomNumber(definition.emitterRoughnessSeed) % 33.219985763; // arbitrary modulo number to shake up the seed between emitters. Otherwise they can start to look similar.
+            definition.roughnessSeed = tracedRays.roughnessSeed % 85.32892875; // setting the roughness seed so it's different between each emitter. Modulo for same reason as above.
+            const rayBodies = tracedRays.rays;
+            hitCount += tracedRays.hitCount;
+
+            if (definition.keep)
+            {
+                if (definition.rayGrouping == RayGroupLevel.Emitters)
+                {
+                    opCreateCompositePart(context, id + i + "compositePart", { "bodies" : rayBodies, "closed" : true });
+
+                    setProperty(context, {
+                                "entities" : qCreatedBy(id + i + "compositePart", EntityType.BODY),
+                                "propertyType" : PropertyType.NAME,
+                                "value" : "Light rays " ~ (i + 1)
+                            });
+                }
+            }
+            else
+            {
+                opDeleteBodies(context, id + i + "deleteLines", { "entities" : rayBodies });
+            }
+        }
+
+        if (definition.keep && definition.rayGrouping == RayGroupLevel.All)
+        {
+            const allRays = qCreatedBy(id, EntityType.BODY);
+            opCreateCompositePart(context, id + "compositeAll", { "bodies" : allRays, "closed" : true });
+            setProperty(context, {
+                        "entities" : qCreatedBy(id + "compositeAll", EntityType.BODY),
+                        "propertyType" : PropertyType.NAME,
+                        "value" : "Light rays"
+                    });
+        }
+
+        if (definition.keep && definition.rayGrouping != RayGroupLevel.Rays)
+        {
+            setProperty(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "propertyType" : PropertyType.APPEARANCE,
+                        "value" : rayColorMap[definition.rayColor]
+                    });
+        }
+
+        // setting the percentage value to name the feature
+        if (!isQueryEmpty(context, definition.targetFaces))
+        {
+            const namePercent = " (" ~ (processHitPercentage(context, id, rayCount, hitCount)) ~ "%)";
+            setFeatureComputedParameter(context, id, { "name" : "percent", "value" : namePercent });
+        }
+
+        // removing the attributes from the parts to not confuse anything downstream
+        if (!isQueryEmpty(context, definition.entities))
+            setAttribute(context, { "entities" : definition.entities, "name" : "opticsPartSettings", "attribute" : undefined });
+
+        if (!isQueryEmpty(context, definition.facesWithSettings))
+            setAttribute(context, { "entities" : definition.facesWithSettings, "name" : "opticsFaceSettings", "attribute" : undefined });
+
+    });
+
+/**
+ * Takes the feature definition, and assigns the settings to each part. It also returns a query for all of the parts.
+ */
+function setPartSettings(context is Context, definition is map) returns Query
+{
+    var parts = [];
+    for (var i = 0; i < size(definition.parts); i += 1)
+    {
+        const entities = definition.parts[i].entities;
+
+        parts = append(parts, entities);
+
+        if (!isQueryEmpty(context, entities))
+        {
+            setAttribute(context, {
+                        "entities" : entities,
+                        "name" : "opticsPartSettings",
+                        "attribute" : {
+                            "index" : definition.parts[i].index,
+                            "bounceType" : definition.parts[i].bounceType
+                        }
+                    });
+        }
+    }
+
+    return qUnion(parts);
+}
+
+export function setRoughnessSettings(context is Context, definition is map) returns Query
+{
+    var result = [];
+    for (var i = 0; i < size(definition.faceSettings); i += 1)
+    {
+        const entities = definition.faceSettings[i].faces;
+
+        result = append(result, entities);
+
+        if (!isQueryEmpty(context, entities))
+        {
+            setAttribute(context, {
+                        "entities" : entities,
+                        "name" : "opticsFaceSettings",
+                        "attribute" : {
+                            "roughness" : definition.faceSettings[i].roughness,
+                            "bounceType" : definition.faceSettings[i].faceBounceType
+                        }
+                    });
+        }
+    }
+    result = result == [] ? qNothing() : qUnion(result);
+
+    return result;
+}
+
+/**
+ * Checks whether the emitter point is beginning inside one of the ray trace entities, or in the medium (i.e. air), and returns the appropriate refractive index. If it detects more than one object it throws an error
+ */
+function getStartStatus(startLine is Line, entities is Query, definition is map, context is Context) returns BoundaryData
+{
+    var startStatus = {};
+
+    const startParts = qNextPart(startLine.origin, startLine.direction, entities);
+
+    if (isQueryEmpty(context, startParts)) // if no entity contains the rayLine origin point, then it's the medium (i.e. air)
+    {
+        startStatus.isMedium = true;
+
+        startStatus.index = definition.mediumIndex;
+
+        startStatus.isTransparent = true;
+    }
+
+    else if (size(evaluateQuery(context, startParts)) == 1) // if only one entity contains the point, we know what index to assign
+    {
+        startStatus.isMedium = false;
+        const attributes = getAttribute(context, { "entity" : startParts, "name" : "opticsPartSettings" });
+        startStatus.index = attributes.index;
+        startStatus.bounceType = attributes.bounceType;
+        startStatus.isTransparent = attributes.bounceType == RayTracerObjectBounceType.Transparent;
+        startStatus.roughness = attributes.roughness;
+    }
+
+    else // if we get more than one entity with this point, we don't know which index to use and throw an error
+    {
+        throw regenError("Unable to determine starting refractive index because the start point is contained in more than one object.");
+    }
+
+    return startStatus as BoundaryData;
+}
+
+/**
+ *  Queries for only the next part in a ray set assuming that the origin of the ray will be touching the boundary between two parts.
+ */
+function qNextPart(point is Vector, nextPartDirection is Vector, entities is Query) returns Query
+{
+    // return qContainsPoint(entities, point)->qFarthestAlong(rayLine.direction); qFarthestAlong() didn't work in cases where there was no next part, so the "farthest" one was still the current part.
+    return qContainsPoint(entities, nudgePoint(point, nextPartDirection));
+}
+
+function qOpticsParts(definition) returns Query
+{
+    var parts = [];
+    for (var set in definition.parts)
+        parts = append(parts, set.entities);
+
+    return qUnion(parts);
+}
+
+function getExitRayLength(context is Context, definition is map) returns ValueWithUnits
+{
+    if (definition.autoSize)
+    {
+        if (isQueryEmpty(context, definition.entities))
+        {
+            regenError("Cannot auto-size exit ray with no parts selected. Defaulting to the `Exit ray length` setting.", ["parts", "autoSize", "exitRayFactor"]);
+            return definition.exitRayLength;
+        }
+        else
+        {
+
+            const bBox = evBox3d(context, { "topology" : qOpticsParts(definition), "tight" : false });
+            return box3dDiagonalLength(bBox) * definition.exitRayFactor;
+        }
+
+    }
+    else
+    {
+        return definition.exitRayLength;
+    }
+}
+
+function traceOneRay(context is Context, id is Id, definition is map, rayLine is Line) returns map
+{
+    var result = {};
+
+    const entities = definition.entities;
+    const exitRayLength = definition.exitRayLength;
+
+    const startStatus = definition.startStatus;
+
+    var currentIndex = startStatus.index;
+    var isMedium = startStatus.isMedium;
+    var nextIndex;
+    var rayPoints = [rayLine.origin];
+
+    for (var i = 0; i < definition.bounces; i += 1)
+    {
+        if (isQueryEmpty(context, entities))
+        {
+            opFitSpline(context, id + "line" + "exit" + i, { "points" : [rayLine.origin, rayLine.origin + rayLine.direction * exitRayLength] });
+            break;
+        }
+
+        const nudgedRay = line(nudgePoint(rayLine.origin, rayLine.direction), rayLine.direction);
+
+        definition.rayCast = evRaycast(context, { "entities" : entities, "ray" : nudgedRay });
+
+        var intersection;
+
+        if (definition.rayCast == []) // ray hits nothing
+        {
+            // ray hits nothing so just make a ray that's sized appropriately to the parts and end it.
+            opFitSpline(context, id + "line" + "exit" + i, { "points" : [rayLine.origin, rayLine.origin + rayLine.direction * exitRayLength] });
+            break;
+        }
+
+        else
+        {
+            intersection = definition.rayCast[0].intersection;
+        }
+
+        if (definition.rayCast[0].entityType == EntityType.EDGE) // ray hits an edge
+        {
+            // ray hits an edge, but not a face. Do we need to consider this case (or is it improbable enough)? maybe we terminate that ray and highlight the intersection points red to show an error. After all, we can't split a single ray of light, and we can't determine refraction without a surface normal.
+
+            opFitSpline(context, id + "line" + "edgeError" + i, { "points" : [rayLine.origin, intersection] });
+
+            const edgeErrorBody = qCreatedBy(id + "line" + "edgeError", EntityType.BODY);
+
+            setErrorEntities(context, id, { "entities" : edgeErrorBody });
+
+            if (!definition.keep)
+                opDeleteBodies(context, id + "deleteErrorBodies", { "entities" : edgeErrorBody });
+
+            break;
+        }
+
+        else // ray hits a face (or very rarely a vertex)
+        {
+            // get information about the material boundary
+            definition.intersection = intersection;
+            definition.rayLine = rayLine;
+
+            var intersectionPlane = getIntersectionPlane(context, definition);
+
+            const isFaceBack = dot(rayLine.direction, intersectionPlane.normal) <= 0; //is the ray leaving a part or entering one?
+
+            // if the ray is coming from inside of a body (i.e. hits the "back" of a face) we want to flip the plane so it interacts in the same way as hitting the front. most important for finding the rotationAxis with cross(), even though the angleOfRefraction calc would be the same since the sine of supplements are equal, like sin(120) == sin(60) etc.
+
+            if (isFaceBack)
+                intersectionPlane.normal = -intersectionPlane.normal;
+
+            const boundaryData = getBoundaryData(id, context, definition, intersectionPlane.normal);
+            nextIndex = boundaryData.nextIndex;
+
+            // if there's roughness at the boundary, jitter the normal of the plane to simulate surface variation.
+            const roughness = getRoughness(definition.rayCast[0], context);
+            if (roughness != 0)
+            {
+                const roughnessTilt = getRoughnessTilt(roughness);
+                definition.roughnessSeed = pseudoRandomNumber(definition.roughnessSeed); // setting the roughness seed so it's different between each bounce.
+                intersectionPlane = getRoughnessTransform(intersectionPlane, roughnessTilt, definition.roughnessSeed) * intersectionPlane;
+            }
+
+            const angleOfIncidence = abs(angleBetween(rayLine.direction, intersectionPlane.normal));
+
+            var rotationAxis;
+            if (!(tolerantEquals(angleOfIncidence, 0 * degree) || tolerantEquals(angleOfIncidence, 180 * degree)))
+                rotationAxis = line(intersection, cross(rayLine.direction, intersectionPlane.normal));
+            else
+                rotationAxis = line(intersection, perpendicularVector(rayLine.direction));
+
+            var rotationTransform;
+
+            if (boundaryData.bounceType == RayTracerObjectBounceType.Mirror) // reflection due to mirrored surface
+            {
+                rotationTransform = rotationAround(rotationAxis, angleOfIncidence + 180 * degree);
+                nextIndex = currentIndex;
+            }
+
+            else if (boundaryData.bounceType == RayTracerObjectBounceType.Transparent)
+            {
+                try silent // refraction
+                {
+                    const angleOfRefraction = -(asin(currentIndex * sin(angleOfIncidence) / nextIndex)); // asin() fails outside of (-1 to 1) range.
+                    rotationTransform = rotationAround(rotationAxis, angleOfRefraction);
+                    isMedium = boundaryData.isMedium;
+                }
+
+                catch (error) //reflection due to angle of incidence
+                {
+                    rotationTransform = rotationAround(rotationAxis, angleOfIncidence + 180 * degree);
+                    nextIndex = currentIndex;
+                }
+            }
+
+            // create the line geometry, preview the color, and get rid of it if we don't want to keep it.
+            try silent
+            {
+                opFitSpline(context, id + "line" + i, { "points" : [rayLine.origin, intersection] });
+            }
+
+            if (boundaryData.bounceType == RayTracerObjectBounceType.Opaque) // if it hits an opaque object, highlight the intersection red and kill the ray.
+            {
+                addDebugPoint(context, intersection, DebugColor.RED);
+                break;
+            }
+
+            // prep for next loop
+
+            rayLine = rotationTransform * line(intersection, intersectionPlane.normal);
+            currentIndex = nextIndex;
+        }
+    }
+
+    const rayChainBody = qCreatedBy(id + "line", EntityType.BODY);
+    var rayChainBodyComposite = undefined;
+
+    if (definition.keep && (definition.rayGrouping == RayGroupLevel.Rays))
+    {
+        opCreateCompositePart(context, id + "composite", { "bodies" : rayChainBody, "closed" : true });
+
+        rayChainBodyComposite = qCreatedBy(id + "composite", EntityType.BODY);
+
+        setProperty(context, {
+                    "entities" : rayChainBodyComposite,
+                    "propertyType" : PropertyType.NAME,
+                    "value" : "Light ray"
+                });
+    }
+
+    if (!isQueryEmpty(context, rayChainBody)) // sometimes there's no ray at all, for example if an emitter is a mate connector on a straight edge of one of the parts. I don't want to make the feature red for this.
+    {
+        result.hitsTarget = rayHitsTarget(context, rayChainBody, definition.targetFaces, definition.highlightTargetFaces);
+        if (definition.colorByTarget && !isQueryEmpty(context, definition.targetFaces))
+        {
+            if (result.hitsTarget && definition.colorHits)
+            {
+                addDebugEntities(context, rayChainBody, DebugColor.GREEN);
+                
+                if (definition.keep && rayChainBodyComposite != undefined)
+                {
+                    setProperty(context, {
+                                "entities" : rayChainBodyComposite,
+                                "propertyType" : PropertyType.APPEARANCE,
+                                "value" : rayColorMap[RayColor.GREEN]
+                            });
+                }
+            }
+            else if (!result.hitsTarget && definition.colorMisses)
+            {
+                addDebugEntities(context, rayChainBody, DebugColor.RED);
+                
+                if (definition.keep && rayChainBodyComposite != undefined)
+                {
+                    setProperty(context, {
+                                "entities" : rayChainBodyComposite,
+                                "propertyType" : PropertyType.APPEARANCE,
+                                "value" : rayColorMap[RayColor.RED]
+                            });
+                }
+            }
+        }
+        else
+        {
+            addDebugEntities(context, rayChainBody, definition.rayColor as DebugColor);
+            
+            if (definition.keep && rayChainBodyComposite != undefined)
+                {
+                    setProperty(context, {
+                                "entities" : rayChainBodyComposite,
+                                "propertyType" : PropertyType.APPEARANCE,
+                                "value" : rayColorMap[definition.rayColor]
+                            });
+                }
+        }
+    }
+    else
+    {
+        result.hitsTarget = false;
+    }
+
+    result.ray = qCreatedBy(id + "line");
+    result.roughnessSeed = definition.roughnessSeed;
+
+    return result;
+}
+
+
+/**
+ * Calculates the entire set of rayLines coming from one emitter. Returns an array of lines.
+ */
+function createRaySet(coord is CoordSystem, definition is map) returns array
+{
+
+    const origin = coord.origin;
+    const mainXAxis = line(origin, coord.xAxis);
+    const centerLine = line(origin, coord.zAxis);
+    var result = [];
+
+
+    if (definition.emitterShape == EmitterShape.FAN) // create a 2D fan of lines
+    {
+        const stepAngle = definition.throwAngle == 0 * degree ?
+            0 * degree :
+            definition.throwAngle / (definition.fanRayCount - 1); // the angle between the lines
+
+        if (definition.fanRayCount == 1)
+        {
+            return [centerLine];
+        }
+
+        else
+        {
+            const startAngle = -definition.throwAngle / 2;
+
+            for (var i = 0; i < definition.fanRayCount; i += 1)
+            {
+                result = append(result, rotationAround(mainXAxis, startAngle + stepAngle * i) * centerLine);
+            }
+        }
+    }
+
+    else if (definition.emitterShape == EmitterShape.CONE_STRUCTURED) //  create a 3D cone of lines in a patterned array
+    {
+        const stepAngle = definition.throwAngle == 0 * degree ?
+            0 * degree :
+            definition.throwAngle / (definition.coneRayDensity - 1) / 2; // the angle between the lines
+        result = [centerLine]; // we'll always have a center ray in this mode
+
+        for (var i = 1; i < definition.coneRayDensity; i += 1)
+        {
+            const newLine = rotationAround(mainXAxis, stepAngle * i) * centerLine;
+
+            result = append(result, newLine); // adding a new line to the fan in one direction
+
+
+            for (var j = 1; j < i * 6; j += 1)
+            {
+                const coneStepAngle = 360 / (i * 6) * degree;
+                result = append(result, rotationAround(centerLine, coneStepAngle * j) * newLine); // patterning the new line into a cone of lines
+            }
+        }
+    }
+
+    else if (definition.emitterShape == EmitterShape.CONE_RANDOM) //  create a 3D cone of lines in a randomized way
+    {
+        result = [centerLine]; // we'll always have a center ray in this mode
+
+        var newSeed = pseudoRandomNumber(definition.emitterRoughnessSeed);
+        for (var i = 1; i < definition.coneRayCount; i += 1)
+        {
+            const transform = getRoughnessTransform(plane(coord), definition.throwAngle / 2, newSeed);
+            newSeed = pseudoRandomNumber(newSeed);
+            result = append(result, transform * centerLine);
+        }
+    }
+
+    return result;
+}
+
+function traceEmitterRays(context is Context, id is Id, definition is map, emitter is CoordSystem) returns map
+{
+    const coord = emitter;
+
+    definition.startStatus = getStartStatus(line(coord.origin, coord.zAxis), definition.entities, definition, context);
+
+    if (!definition.startStatus.isTransparent)
+    {
+        addDebugPoint(context, emitter.origin, DebugColor.RED);
+        return {};
+    }
+
+    var raySet = createRaySet(coord, definition);
+    if (definition.emitterRoughness > 0)
+        raySet = applyRoughnessToRaySet(coord, raySet, definition.emitterRoughnessSeed, definition.emitterRoughness);
+
+
+
+    var rayResult = [];
+    var hitCount = 0;
+    for (var i = 0; i < size(raySet); i += 1)
+    {
+        const rayLine = raySet[i];
+        const tracedRay = traceOneRay(context, id + "ray" + i, definition, rayLine);
+        definition.roughnessSeed = tracedRay.roughnessSeed; // setting the roughness seed so it's different between each ray
+        rayResult = append(rayResult, tracedRay.ray);
+        if (tracedRay.hitsTarget)
+            hitCount += 1;
+    }
+
+    return { "rays" : qUnion(rayResult)->qEntityFilter(EntityType.BODY), "hitCount" : hitCount, "roughnessSeed" : definition.roughnessSeed, "emitterRoughnessSeed" : definition.emitterRoughnessSeed };
+}
+
+/**
+ * Returns an array of coordinate systems, each representing one emitter.
+ */
+function getEmitters(context is Context, definition is map) returns array
+{
+    var direction = extractDirection(context, definition.direction);
+
+    var result = [];
+
+    if (definition.emitterMode == EmitterMode.Point)
+    {
+        const pointEmitters = evaluateQuery(context, definition.pointEmitters);
+        for (var mateConnector in pointEmitters)
+        {
+            const emitterPlane = evMateConnector(context, { "mateConnector" : mateConnector })->plane();
+            result = append(result, emitterPlane);
+        }
+    }
+
+    else if (definition.emitterMode == EmitterMode.Curve)
+    {
+        try silent
+        {
+            const path = constructPath(context, definition.curveEmitters);
+
+            const startAndEnd = evPathTangentLines(context, path, [0, 1]).tangentLines;
+
+            const isPeriodic = tolerantEquals(startAndEnd[0].origin, startAndEnd[1].origin);
+
+            const endParam = isPeriodic ? 1 - 1 / definition.curveEmitterCount : 1;
+
+            const parameters = range(0, endParam, definition.curveEmitterCount);
+
+            const pathLines = evPathTangentLines(context, path, parameters);
+
+            for (var i = 0; i < size(pathLines.tangentLines); i += 1)
+            {
+                var emitterPlane = plane(pathLines.tangentLines[i].origin, direction);
+                result = append(result, emitterPlane);
+            }
+        }
+        catch (error)
+        {
+            throw regenError("Curve emitters must form a continuous path.");
+        }
+    }
+
+    else if (definition.emitterMode == EmitterMode.Area)
+    {
+        const facePeriodicity = evFacePeriodicity(context, { "face" : definition.faceEmitter });
+
+        var uRange = facePeriodicity[0] ? range(0, 1 - 1 / definition.uCount, definition.uCount) : range(0, 1, definition.uCount);
+        var vRange = facePeriodicity[1] ? range(0, 1 - 1 / definition.vCount, definition.vCount) : range(0, 1, definition.vCount);
+
+        var paramaters = [];
+        for (var u = 0; u < definition.uCount; u += 1)
+        {
+            for (var v = 0; v < definition.vCount; v += 1)
+            {
+                {
+                    paramaters = append(paramaters, vector(uRange[u], vRange[v]));
+                }
+            }
+        }
+        const facePlanes = evFaceTangentPlanes(context, {
+                    "face" : definition.faceEmitter,
+                    "parameters" : paramaters
+                });
+
+        result = facePlanes;
+    }
+
+
+    // orient to direction, flip direction, rotate per user angle, and convert planes to coords
+    const angle = definition.flipEmitterRotation ? -definition.emitterRotation : definition.emitterRotation;
+    var orientedCoords = [];
+    for (var pln in result)
+    {
+        var normal = direction == undefined ? pln.normal : direction;
+        if (definition.flipDirection)
+            normal = -normal;
+
+        const rotation = rotationAround(line(pln.origin, normal), angle);
+
+        const newPlane = rotation * plane(pln.origin, normal);
+
+        orientedCoords = append(orientedCoords, newPlane->coordSystem());
+    }
+    result = orientedCoords;
+
+    return result;
+}
+
+/**
+ * Nudges a point slightly (by about an order of magnitude over floating point limit) so that we don't pick up ray intersections right on the origin, or the current part when we only want the next part.
+ */
+function nudgePoint(point is Vector, direction is Vector) returns Vector
+{
+    return point + direction * TOLERANCE.zeroLength * meter * 15;
+}
+
+type BoundaryData typecheck canBeBoundaryData;
+
+predicate canBeBoundaryData(boundaryData is map)
+{
+    boundaryData.nextIndex is number;
+    boundaryData.isMedium is boolean;
+    boundaryData.bounceType is RayTracerObjectBounceType;
+    boundaryData.roughness is number;
+    boundaryData.roughness >= 0;
+    boundaryData.roughness <= 1;
+    boundaryData.isTransparent is boolean;
+}
+
+
+/**
+ * Finds information about each boundary, like the nextIndex, and whether we hit air or another part. Checks whether we hit nothing (i.e. the medium), or a part, or too many parts (in which case throw a warning).
+ */
+function getBoundaryData(id is Id, context is Context, definition is map, normal is Vector) returns BoundaryData
+{
+    var result = {};
+
+
+
+    const contactedFace = definition.rayCast[0].entity;
+
+    const contactedFaceSettings = getAttribute(context, { "entity" : contactedFace, "name" : "opticsFaceSettings" });
+
+    if (contactedFaceSettings != undefined)
+    {
+        // result.bounceType = contactedFaceSettings.bounceType;
+    }
+    else
+    {
+        const otherContactedFaces = qContainsPoint(definition.facesWithSettings, definition.intersection)->qSubtraction(contactedFace);
+        // TODO more than 1? then error (is error for doubleup needed or already handled elsewhere?)
+        // otherwise use those settings at least for mirror/refractor. Does it also need to use this face's roughness, or does that not make sense. Gotta think it through.
+    }
+
+
+
+    // const thisPart = contactedFace->qOwnerBody();
+    const nextPart = qNextPart(definition.intersection, normal, definition.entities);
+
+    if (isQueryEmpty(context, nextPart)) // if there's no next part, we hit air so set the index to match the medium index.
+    {
+        result.nextIndex = definition.mediumIndex;
+        result.bounceType = RayTracerObjectBounceType.Transparent;
+        result.isMedium = true;
+    }
+
+    else if (size(evaluateQuery(context, nextPart)) > 1) // if we didn't hit air, did we hit too many parts? This should be rare
+    {
+        throw reportFeatureWarning(context, id, "Ray hit overlapping parts. Parts may touch to simulate an optical bond, but must not overlap.");
+        result.tooManyParts = true;
+    }
+
+    else // if we only hit one other part, use it to get the next index.
+    {
+        const nextAttributes = getAttribute(context, { "entity" : nextPart, "name" : "opticsPartSettings" });
+        result.nextIndex = nextAttributes.index;
+        result.bounceType = nextAttributes.bounceType;
+        result.isMedium = false;
+    }
+
+    return result as BoundaryData;
+}
+
+function getRayCount(definition is map, emitters is array) returns number
+{
+    const emitterCount = size(emitters);
+    var raysPerEmitter = 1;
+
+    if (definition.emitterShape == EmitterShape.FAN) // create a 2D fan of lines
+        raysPerEmitter = definition.fanRayCount;
+
+    else if (definition.emitterShape == EmitterShape.CONE_RANDOM) // create a randomized cone of lines
+        raysPerEmitter = definition.coneRayCount;
+
+    else if (definition.emitterShape == EmitterShape.CONE_STRUCTURED) //  create a 3D cone of lines
+        for (var i = 0; i < definition.coneRayDensity; i += 1)
+            raysPerEmitter += i * 6;
+
+    return emitterCount * raysPerEmitter;
+}
+
+function rayHitsTarget(context is Context, ray is Query, targets is Query, highlight is boolean) returns boolean
+{
+    var hitsTarget = false;
+    if (!isQueryEmpty(context, targets))
+    {
+        const distanceToTarget = evDistance(context, { "side0" : ray, "side1" : targets });
+        hitsTarget = tolerantEquals(0 * meter, distanceToTarget.distance);
+        if (hitsTarget && highlight)
+        {
+            addDebugPoint(context, distanceToTarget.sides[1].point, DebugColor.GREEN);
+        }
+    }
+    return hitsTarget;
+}
+
+/**
+ * Takes the total number of rays, and the number of target hits to display the hits as a percentage. This is useful for knowing how much of the light reaches a goal, like the end of a light pipe.
+ */
+function processHitPercentage(context is Context, id is Id, rayCount is number, hitCount is number) returns number
+{
+    try silent // This is likely to fail if the feature isn't totally set up yet. In that case I want to just return zero.
+    {
+        const percent = (hitCount / rayCount * 100)->roundToPrecision(1);
+        reportFeatureInfo(context, id, percent ~ "% of rays reached the target.");
+        return percent;
+    }
+    catch (error)
+    {
+        return 0;
+    }
+}
+
+export function getRoughness(raycastResult is RaycastResult, context is Context) returns number
+{
+    const faceSettings = getAttribute(context, { "entity" : raycastResult.entity, "name" : "opticsFaceSettings" });
+
+    const result = faceSettings == undefined ? 0 : faceSettings.roughness;
+
+    return result;
+}
+
+/**
+ * Takes in an intersection plane and returns a transform to be used to pseudo-randomly jitter the normal direction to simulate surface variations.
+ */
+export function getRoughnessTransform(plane is Plane, roughnessTilt is ValueWithUnits, seed is number) returns Transform
+{
+    const xAngle = pseudoRandomNumber(seed, 0, roughnessTilt / degree) * degree;
+    const xRotation = rotationAround(line(plane.origin, plane.x), xAngle);
+
+    const zSeed = pseudoRandomNumber(seed);
+    const zAngle = pseudoRandomNumber(zSeed + 1, 0, 360) * degree;
+    const zRotation = rotationAround(line(plane.origin, plane.normal), zAngle);
+
+    return zRotation * xRotation;
+}
+
+/**
+ * Remaps the rougness value from 0-to-1 to 0deg-to-90deg.
+ * @example `0` returns `0 * degree`
+ * @example `0.5` returns `45 * degree`
+ * @example `1` returns `90 * degree`
+ */
+export function getRoughnessTilt(roughness is number) returns ValueWithUnits
+{
+    return remap(roughness, 0, 1, 0, 90) * degree;
+}
+
+/**
+ * A silly-feeling, but functional way to get the plane. It's usually just evFaceTangentPlane(), but there's a lot of workaround here to handle a degenerate point you'd find in the middle of a revolve, for example a lens, which is not a case to ignore.
+ */
+export function getIntersectionPlane(context is Context, definition is map) returns Plane
+{
+    var intersectionPlane;
+
+    if (definition.rayCast[0].entityType == EntityType.VERTEX)
+    {
+        const adJacentFace = qAdjacent(definition.rayCast[0].entity, AdjacencyType.VERTEX, EntityType.FACE);
+
+        try silent // if it's a sharp point of a revolved surface, like a cone tip, and evAxis() will work. If so, we'll treat it as if the ray hits a microscopic little flat at the tip, but making the "normal" match the axis direction.
+        {
+            const normal = evAxis(context, { "axis" : adJacentFace }).direction;
+            intersectionPlane = plane(definition.rayCast[0].intersection, normal);
+            return intersectionPlane;
+        }
+        catch (error) // if this fails, it's likely the tip of a loft and we'll get the normal of a location sightly off the point as a last resort rather than fail it (because it's least precise, but good enough).
+        {
+            var parameter = evDistance(context, { "side0" : definition.rayCast[0].intersection, "side1" : adJacentFace }).sides[1].parameter;
+            parameter[0] = clamp(parameter[0], 1e-6, 1 - 1e-6);
+            parameter[1] = clamp(parameter[1], 1e-6, 1 - 1e-6);
+
+            const normal = evFaceTangentPlane(context, { "face" : adJacentFace, "parameter" : parameter }).normal;
+            intersectionPlane = plane(definition.rayCast[0].intersection, normal);
+            return intersectionPlane;
+        }
+    }
+
+    else
+    {
+        try silent // it hits a face on a non-degenerate point. this is BY FAR the most common scenario.
+        {
+            intersectionPlane = evFaceTangentPlane(context, { "face" : definition.rayCast[0].entity, "parameter" : definition.rayCast[0].parameter });
+            return intersectionPlane;
+        }
+        catch (error) // if the above fails, it's likely because of a degenerate point like the center of a revolved lens. evAxis() fails when the face is tangent (as in a lens or sphere pole), which seems like a bug. To work around it we're using the min and max curvature directions to get 2 perpindicular vectors and cross() on them to find the normal. This only works with a tangent degenerate point.
+        {
+            try silent
+            {
+                const curvature = evFaceCurvature(context, {
+                            "face" : definition.rayCast[0].entity,
+                            "parameter" : definition.rayCast[0].parameter
+                        });
+
+                const normal = cross(curvature.minDirection, curvature.maxDirection); // Do these always point different directions, or might it be arbitrary on symmetrical faces and fail sometimes?
+                intersectionPlane = plane(definition.rayCast[0].intersection, normal);
+                return intersectionPlane;
+            }
+        }
+    }
+}
+
+export function applyRoughnessToRaySet(coord is CoordSystem, raySet is array, seed is number, roughness is number) returns array
+{
+    var result = [];
+    var newSeed = pseudoRandomNumber(1 / seed);
+    for (var rayLine in raySet)
+    {
+        const roughnessPlane = plane(coord.origin, rayLine.direction);
+        const roughnessTilt = getRoughnessTilt(roughness);
+        const roughnessTransform = getRoughnessTransform(roughnessPlane, roughnessTilt, newSeed);
+        newSeed = pseudoRandomNumber(newSeed);
+        result = append(result, roughnessTransform * rayLine);
+    }
+
+    return result;
+}
+
+export function opticsEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+
+    /////// update the ray count preview in the feature UI
+    definition.rayCountPreview = countRays(context, definition);
+
+    /////// hide or show the seed value for emitter roughness based on if it's set to 0 or not ///////
+    definition.showEmitterRoughnessSeed = definition.emitterRoughness != 0;
+
+    /////// setting the direction for planar Area emitter selections ///////
+    if (!specifiedParameters.direction) //if direction hasn't been set by the user yet in this edit session
+    {
+        if ((definition.emitterMode == EmitterMode.Area) && (oldDefinition.faceEmitter != definition.faceEmitter)) // if the mode is Area and the face selection changes
+        {
+            try silent
+            {
+                evPlane(context, { "face" : definition.faceEmitter }); // check if it's planar
+                definition.direction = definition.faceEmitter; // if it hasn't failed yet, then add the face to the direction query too.
+            }
+        }
+        // return definition;
+    }
+
+    return definition;
+}
+
+/**
+ * Calculates the number of rays produced by a given set of feature inputs accounting for the number of emitters and number of rays per emitter.
+ */
+function countRays(context is Context, definition is map) returns number
+{
+    // counting total emitters
+    var emitterCount;
+
+    if (definition.emitterMode == EmitterMode.Point)
+    {
+        emitterCount = size(evaluateQuery(context, definition.pointEmitters));
+    }
+    else if (definition.emitterMode == EmitterMode.Curve)
+    {
+        emitterCount = definition.curveEmitterCount;
+    }
+    else if (definition.emitterMode == EmitterMode.Area)
+    {
+        emitterCount = definition.uCount * definition.vCount;
+    }
+
+    // counting rays per emitter
+    var raysPerEmitter;
+    if (definition.emitterShape == EmitterShape.FAN)
+    {
+        raysPerEmitter = definition.fanRayCount;
+    }
+    else if (definition.emitterShape == EmitterShape.CONE_STRUCTURED)
+    {
+        raysPerEmitter = 1;
+        for (var i = 0; i < definition.coneRayDensity; i += 1)
+            raysPerEmitter += i * 6;
+    }
+    else if (definition.emitterShape == EmitterShape.CONE_RANDOM)
+    {
+        raysPerEmitter = definition.coneRayCount;
+    }
+
+    // multiply them together
+    return emitterCount * raysPerEmitter;
+}
+
+
