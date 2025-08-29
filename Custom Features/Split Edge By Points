@@ -1,0 +1,951 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2581;
+import(path : "onshape/std/geometry.fs", version : "2581.0");
+import(path : "onshape/std/common.fs", version : "2581.0");
+import(path : "onshape/std/table.fs", version : "2581.0");
+
+featureIcon::import(path : "ae20fe2f9fea93ad9082b5cc", version : "a17b412896a475d2c6878f66");
+featureDescriptionImage::import(path : "3277230a0960dfed2a4086ff", version : "d3c3ab096eb8d769b33826a8");
+
+
+Xicon::import(path : "9f4c9835d8018ff7dbdb5683/7784890493c12aa714be2e4b/bd3d0740d3228fd0c71bb1c9", version : "7c278e18064fc01a3887577d");
+Yicon::import(path : "9f4c9835d8018ff7dbdb5683/7784890493c12aa714be2e4b/7a5c068f8c5bb3fa2882efdc", version : "76d50510ed202394ba5f87dd");
+Zicon::import(path : "9f4c9835d8018ff7dbdb5683/7784890493c12aa714be2e4b/36f36f5f384b30aa0ab76d5c", version : "a861ad254e7643e25022c3b2");
+
+export enum PointCreationType
+{
+    Parameter,
+    Distance,
+}
+
+annotation { "Feature Type Name" : "Split edge by points",
+        "Manipulator Change Function" : "splitPointsManipulatorChange",
+        "Editing Logic Function" : "pointsEditingLogic",
+        "Icon" : featureIcon::BLOB_DATA,
+        "Feature Type Description" : "Splits curves and part edges based on reference geometry.",
+        "Description Image" : featureDescriptionImage::BLOB_DATA
+    }
+export const splitByPoints = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        // a boolean to tell whether a new point was added by the insert mode or not. this drives whether parts of the editing logic should run or not.
+        annotation { "Name" : "point was added by a manipulator", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.manipChangedPointsList is boolean;
+
+        // a boolean to tell when the feature has just been created. If so we can go ahead and add the first two spline points for the user.
+        annotation { "Name" : "new feature", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.newFeature is boolean;
+
+        // This hidden number changes the index of the selected point when it's clicked.
+        annotation { "Name" : "Point index", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isInteger(definition.pointIndex, { (unitless) : [0, 0, 1000000] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Edge to split", "Filter" : EntityType.EDGE, "MaxNumberOfPicks" : 1 }
+        definition.curve is Query;
+
+        annotation { "Name" : "Vertices", "Item name" : "Vertex", "Item label template" : "Vertex #arrayPointIndex" }
+        definition.vertices is array;
+
+        for (var vertex in definition.vertices)
+        {
+
+            // This hidden index number let's me rename the point with its index value. i.e. "Point 1"
+            annotation { "Name" : "Array point index", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            isInteger(vertex.arrayPointIndex, { (unitless) : [0, 0, 1000000] } as IntegerBoundSpec);
+
+            annotation { "Name" : "Reference vertex, edge, or face",
+                        "Filter" : QueryFilterCompound.ALLOWS_VERTEX || EntityType.EDGE || EntityType.FACE,
+                        "MaxNumberOfPicks" : 1, "UIHint" : [UIHint.MATCH_LAST_ARRAY_ITEM, UIHint.UNCONFIGURABLE] }
+            vertex.referenceSelection is Query;
+
+            annotation { "Name" : "Direction (optional)",
+                        "Filter" : QueryFilterCompound.ALLOWS_DIRECTION || BodyType.MATE_CONNECTOR,
+                        "MaxNumberOfPicks" : 1, "UIHint" : [UIHint.MATCH_LAST_ARRAY_ITEM, UIHint.UNCONFIGURABLE] }
+            vertex.directionSelection is Query;
+
+            annotation { "Name" : "Flip direction", "UIHint" : [UIHint.OPPOSITE_DIRECTION, UIHint.MATCH_LAST_ARRAY_ITEM] }
+            vertex.flipDirection is boolean;
+
+            // this hidden enum is controlled by editing logic and tells the UI what kind of reference is selected.
+            annotation { "Name" : "Reference Type", "UIHint" : [UIHint.ALWAYS_HIDDEN, UIHint.MATCH_LAST_ARRAY_ITEM] }
+            vertex.refType is ReferenceType;
+
+            if (vertex.refType == ReferenceType.isNothing || vertex.refType == ReferenceType.isVertex || vertex.refType == ReferenceType.isPlanarFace)
+            {
+                annotation { "Name" : "X", "Icon" : Xicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isLength(vertex.X, ZERO_DEFAULT_LENGTH_BOUNDS);
+
+                annotation { "Name" : "Y", "Icon" : Yicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isLength(vertex.Y, ZERO_DEFAULT_LENGTH_BOUNDS);
+
+                annotation { "Name" : "Z", "Icon" : Zicon::BLOB_DATA, "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isLength(vertex.Z, ZERO_DEFAULT_LENGTH_BOUNDS);
+            }
+
+            if (vertex.refType == ReferenceType.isEdge)
+            {
+                annotation { "Name" : "Mode", "UIHint" : UIHint.SHOW_LABEL }
+                vertex.pointCreationType is PointCreationType;
+
+                if (vertex.pointCreationType == PointCreationType.Parameter)
+                {
+
+                    annotation { "Name" : "Parameter", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                    isReal(vertex.curveParameter, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+
+                }
+                if (vertex.pointCreationType == PointCreationType.Distance)
+                {
+                    annotation { "Name" : "Distance" }
+                    isLength(vertex.curveDistance, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+                }
+                annotation { "Name" : "Flip ends", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                vertex.curveFlip is boolean;
+            }
+
+            if (vertex.refType == ReferenceType.isNonPlanarFace)
+            {
+                annotation { "Name" : "U Parameter", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isReal(vertex.uParam, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+
+                annotation { "Name" : "V Parameter", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isReal(vertex.vParam, { (unitless) : [0, .5, 1] } as RealBoundSpec);
+
+                annotation { "Name" : "Normal distance", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+                isLength(vertex.normalDistance, ZERO_DEFAULT_LENGTH_BOUNDS);
+            }
+
+
+            annotation { "Name" : "Add symmetric split", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM }
+            vertex.symmetricPoint is boolean;
+        }
+
+        // annotation { "Name" : "Keep points" }
+        // definition.keepPoints is boolean;
+
+    }
+    {
+        // what type of reference, if any, is selected for the active point. Output is a map of booleans for all selection types for easy use later.
+        const refType = getEntityTypeBooleans(context, definition.vertices[definition.pointIndex].referenceSelection);
+
+        // getting a location for the active vertex
+        const pointInfo = getPointInfo(definition.vertices[definition.pointIndex], context, refType);
+
+        var points = createFreeSplinePointsList(context, definition);
+        const splitParameters = getSplitParameters(context, id, definition, points);
+
+        const symmetricSplitParameters = createSymmetricalParameters(context, definition, splitParameters);
+        const symmetricPoints = createSymmetricPointsByParameters(id, context, symmetricSplitParameters, definition);
+
+        // const mergedPointsList = concatenateArrays([points, symmetricPoints]);
+        const mergedSplitParameters = concatenateArrays([splitParameters, symmetricSplitParameters]);
+
+        // create points (TODO: is this valuable to have or overcomplicating it?)
+        // if (definition.keepPoints)
+        // {
+        //     var pointSize = size(points);
+        //     for (var i = 0; i < pointSize; i += 1)
+        //     {
+        //         opPoint(context, id + "point" + i, {
+        //                     "point" : points[i]
+        //                 });
+        //     }
+
+        //     // create symmetrical points in a separate list
+        //     for (var i = 0; i < size(symmetricPoints); i += 1)
+        //     {
+        //         opPoint(context, id + "symmetricPoint" + i, {
+        //                     "point" : symmetricPoints[i]
+        //                 });
+        //     }
+        // }
+
+
+        if (size(definition.vertices) > 1 && points[0] != points[1])
+        {
+            // saying which vertex is active
+
+            reportFeatureInfo(context, id, "Vertex " ~ toString(definition.pointIndex + 1) ~ " is active");
+        }
+
+        // add manipulators and some messages
+        const referenceSelection = definition.vertices[definition.pointIndex].referenceSelection;
+
+        // if something is selected
+        if (!refType.isNothing)
+        {
+            if (refType.isEdge)
+            {
+                var tanLine = evEdgeTangentLine(context, {
+                        "edge" : definition.vertices[definition.pointIndex].referenceSelection,
+                        "parameter" : getCurveParameter(context, definition.vertices[definition.pointIndex])
+                    });
+                var tanPoint = tanLine.origin;
+                var tanManipDirection = tanLine.direction;
+
+                var tanManip = linearManipulator({
+                        "base" : tanPoint,
+                        "direction" : tanManipDirection,
+                        "offset" : 0 * meter,
+                        "style" : ManipulatorStyleEnum.TANGENTIAL
+                    });
+
+                addManipulators(context, id, { "tanManip" : tanManip });
+            }
+
+            if (refType.isPlanarFace || refType.isNonPlanarFace)
+            {
+                var zOffset = refType.isPlanarFace ? definition.vertices[definition.pointIndex].Z : definition.vertices[definition.pointIndex].normalDistance;
+                var faceManip = faceTangentManipulator(context, definition, pointInfo.plane, zOffset);
+                addManipulators(context, id, faceManip);
+
+            }
+        }
+
+        // If nothing is selected or it's a point then use use a triad manipulator.
+        if (refType.isNothing || refType.isVertex || refType.isMateConnector)
+        {
+            var triManipOffset = points[definition.pointIndex];
+            var triManip = triadManipulator({
+                    "base" : vector(0, 0, 0) * meter,
+                    "offset" : triManipOffset
+                });
+            addManipulators(context, id, { "triManip" : triManip });
+        }
+
+        // add the point manipulators.
+        var pointManip = pointsManipulator({
+                "points" : points,
+                "index" : definition.pointIndex
+            });
+        addManipulators(context, id, { "pointManip" : pointManip });
+
+        // add the symmetric point manipulators
+        var symmetricIndexMatchMap = getSymmetricPointIndexMatch(context, definition);
+
+        //TODO get symmetric manip working
+        var symmetricPointManip = pointsManipulator({
+                "points" : symmetricPoints,
+                "index" : symmetricIndexMatchMap[definition.pointIndex]
+            });
+
+        addManipulators(context, id, { "symmetricPointManip" : symmetricPointManip });
+
+
+
+        // split the edge. This is after the manipulators so it doesn't make them jumpy
+        if (doParametersSplitTheCurve(mergedSplitParameters))
+        {
+            opSplitEdges(context, id + "splitEdges", {
+                        "edges" : definition.curve,
+                        "parameters" : [mergedSplitParameters],
+                    });
+        }
+    });
+
+
+export function pointsEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map,
+    isCreating is boolean, specifiedParameters is map, hiddenBodies is Query) returns map
+{
+    // if it's a new feature, go ahead and add the first point on the origin instead of making the user add it.
+    // if (isCreating && definition.newFeature)
+    // {
+    //     definition.newFeature = false;
+    //     definition.vertices = [{ X : 0 * meter, Y : 0 * meter, Z : 0 * meter, arrayPointIndex : 1, curveParameter : 0.5, referenceType : ReferenceType.isNothing, referenceSelection : qNothing() }];
+    //     return definition;
+    // }
+
+    // set the index for each point for naming them.
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        definition.vertices[i].arrayPointIndex = i + 1;
+    }
+
+    // top "if" prevents errors from checking size of "undefined".
+    if (definition.vertices is array && oldDefinition.vertices is array)
+    {
+        // if a point is removed such that the array index falls off the end,
+        if (size(definition.vertices) - 1 < oldDefinition.pointIndex)
+        {
+            //select the last point in the array.
+            definition.pointIndex = size(definition.vertices) - 1;
+
+            // without this return, it doesn't work as intended.
+            return definition;
+        }
+
+        //if a new point is added,
+        if (size(definition.vertices) > size(oldDefinition.vertices))
+        {
+            //select the new point.
+            definition.pointIndex = size(definition.vertices) - 1;
+        }
+
+        // a loop for changing parameters of an individual point array.
+        for (var i = 0; i < min(size(oldDefinition.vertices), size(definition.vertices)); i += 1)
+        {
+            // if any point is edited from the UI,
+            if (oldDefinition.vertices[i] != definition.vertices[i] && !definition.manipChangedPointsList)
+            {
+                // select the edited point by changing the hidden index UI param.
+                definition.pointIndex = i;
+
+                const oldSelection = oldDefinition.vertices[i].referenceSelection;
+                const oldRefType = getEntityTypeBooleans(context, oldSelection);
+
+                const newSelection = definition.vertices[i].referenceSelection;
+                const refType = getEntityTypeBooleans(context, newSelection);
+
+                // if there's no selection,
+                if (refType.isNothing)
+                {
+                    // set the hidden enum to set the UI
+                    definition.vertices[i].refType = ReferenceType.isNothing;
+                }
+
+                if (!refType.isEdge)
+                {
+
+                }
+
+                // if a reference is selected,
+                if (oldSelection.subqueries != newSelection.subqueries && !refType.isNothing)
+                {
+
+                    //set the xyz offset to zero.
+                    definition.vertices[i].X = 0 * meter;
+                    definition.vertices[i].Y = 0 * meter;
+                    definition.vertices[i].Z = 0 * meter;
+
+                    // if the reference is a vertex
+                    if (refType.isVertex || refType.isMateConnector) // keeping these together for now, since I'm treating MCs like points. Maybe I'll treat them like planar faces later.
+                    {
+                        // set the hidden enum to set the UI
+                        definition.vertices[i].refType = ReferenceType.isVertex;
+                    }
+
+                    // if the reference is an edge or face. grouped since we want to snap to the closest point for them all.
+                    if (refType.isEdge || refType.isPlanarFace || refType.isNonPlanarFace)
+                    {
+                        // if it's a planar face, use the evaluated plane so we get lengths instead of uv params
+                        const side1Item = refType.isPlanarFace ? evPlane(context, { "face" : newSelection }) : newSelection;
+
+                        //snap to the closest point.
+                        var oldPoint = getPointInfo(oldDefinition.vertices[i], context, oldRefType).point;
+
+                        var distanceResult is DistanceResult = evDistance(context, { "side0" : oldPoint, "side1" : side1Item });
+                        var newParam = distanceResult.sides[1].parameter;
+
+                        if (refType.isEdge)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isEdge;
+
+                            // set the curve param
+                            definition.vertices[i].curveParameter = newParam;
+
+                            // set curve distance
+                            definition.vertices[i].curveDistance = evLength(context, { "entities" : definition.vertices[i].referenceSelection }) * newParam;
+                        }
+
+                        if (refType.isPlanarFace)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isPlanarFace;
+
+                            // set the XYZ dims relative to the planar face
+
+                            definition.vertices[i].X = newParam[0];
+                            definition.vertices[i].Y = newParam[1];
+                            definition.vertices[i].Z = 0 * inch;
+
+                        }
+
+                        if (refType.isNonPlanarFace)
+                        {
+                            // set the hidden enum to set the UI
+                            definition.vertices[i].refType = ReferenceType.isNonPlanarFace;
+
+                            // set the face param
+                            definition.vertices[i].uParam = newParam[0];
+                            definition.vertices[i].vParam = newParam[1];
+                            definition.vertices[i].normalDistance = 0 * inch;
+
+                        }
+                    }
+                }
+
+                // if a point reference is de-selected (old selection isn't empty, and new one is)
+                if (!isQueryEmpty(context, oldSelection) && isQueryEmpty(context, newSelection))
+                {
+                    // set the hidden enum to set the UI
+                    definition.vertices[i].refType = ReferenceType.isNothing;
+
+                    // make the xyz equal to the point's world coordinates plus the old offset (i.e. keep the point where it was)
+                    var oldPoints = createFreeSplinePointsList(context, oldDefinition);
+                    var oldLocation = oldPoints[i];
+
+                    definition.vertices[i].X = oldLocation[0];
+                    definition.vertices[i].Y = oldLocation[1];
+                    definition.vertices[i].Z = oldLocation[2];
+                }
+            }
+        }
+        return definition;
+    }
+}
+
+export function splitPointsManipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+    // var points = createFreeSplinePointsList(context, definition);
+
+    // if the user clicks a point manipulator
+    if (newManipulators["pointManip"] is map)
+    {
+        definition.pointIndex = newManipulators["pointManip"].index;
+    }
+
+    // if the user clicks a symmetric point manipulator
+    if (newManipulators["symmetricPointManip"] is map)
+    {
+
+        var symmetricIndex = newManipulators["symmetricPointManip"].index;
+        var symmetricIndexMatchMap = getSymmetricPointIndexMatch(context, definition);
+
+        var swappedSymmetricIndexMap = swapMap(symmetricIndexMatchMap);
+
+        definition.pointIndex = swappedSymmetricIndexMap[symmetricIndex];
+    }
+
+    // if the user moves a triad manipulator
+    if (newManipulators["triManip"] is map)
+    {
+        var reference;
+        var references = [];
+        for (var i = 0; i < size(definition.vertices); i += 1)
+        {
+
+            var vertex = definition.vertices[i];
+
+            var refType = getEntityTypeBooleans(context, vertex.referenceSelection);
+
+            if (!refType.isNothing)
+            {
+                if (refType.isVertex || refType.isMateConnector)
+                {
+                    reference = evVertexPoint(context, {
+                                "vertex" : vertex.referenceSelection
+                            });
+                }
+                if (refType.isEdge)
+                {
+                    reference = evEdgeTangentLine(context, {
+                                    "edge" : vertex.referenceSelection,
+                                    "parameter" : vertex.curveParameter
+                                }).origin;
+                }
+            }
+            else
+            {
+                reference = zeroVector(3) * meter;
+            }
+            references = append(references, reference);
+        }
+
+        const triOffset = newManipulators["triManip"].offset - references[definition.pointIndex];
+        definition.vertices[definition.pointIndex].X = triOffset[0];
+        definition.vertices[definition.pointIndex].Y = triOffset[1];
+        definition.vertices[definition.pointIndex].Z = triOffset[2];
+    }
+
+    // if the user moves an edge manipulator
+    if (newManipulators["tanManip"] is map)
+    {
+        var m = newManipulators["tanManip"];
+        var pos = m.base + m.direction * m.offset;
+        var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.vertices[definition.pointIndex].referenceSelection });
+        var newParam = distanceResult.sides[1].parameter;
+        if (definition.vertices[definition.pointIndex].curveFlip)
+            newParam = 1 - newParam;
+
+        // Update curve param and curve distance
+        definition.vertices[definition.pointIndex].curveParameter = newParam;
+        definition.vertices[definition.pointIndex].curveDistance = evLength(context, { "entities" : definition.vertices[definition.pointIndex].referenceSelection }) * newParam;
+    }
+
+    if (newManipulators["xFaceTanManip"] is map || newManipulators["yFaceTanManip"] is map || newManipulators["zFaceTanManip"] is map)
+    {
+        definition = processFaceTangentManipulator(context, definition, newManipulators);
+        return definition;
+    }
+
+    // if the user moves a face manipulator
+    if (newManipulators["xFaceTanManip"] is map || newManipulators["yFaceTanManip"] is map)
+    {
+        var m = newManipulators["xFaceTanManip"] is map ? newManipulators["yFaceTanManip"] : newManipulators["yFaceTanManip"];
+        var pos = m.base + m.direction * m.offset;
+        var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.reference });
+        var newParam = distanceResult.sides[1].parameter;
+        definition.uParam = newParam[0];
+        return definition;
+    }
+
+    return definition;
+}
+
+function createFreeSplinePointsList(context is Context, definition is map) returns array
+{
+    var points = [];
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        var refType = getEntityTypeBooleans(context, vertex.referenceSelection);
+
+        var point = getPointInfo(vertex, context, refType).point;
+        points = append(points, point);
+    }
+
+    return points;
+}
+
+function createSymmetricalParameters(context is Context, definition is map, parameters is array) returns array
+{
+    var symmetricalParameters = [];
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        if (vertex.symmetricPoint)
+        {
+            symmetricalParameters = append(symmetricalParameters, 1 - parameters[i]);
+        }
+    }
+
+    return symmetricalParameters;
+}
+
+function createSymmetricPointsByParameters(id is Id, context is Context, parameters is array, definition is map) returns array
+{
+
+    const tanLines = evEdgeTangentLines(context, { "edge" : definition.curve, "parameters" : parameters });
+
+    var symmetricPoints = [];
+
+    for (var line in tanLines)
+        symmetricPoints = append(symmetricPoints, line.origin);
+
+    return symmetricPoints;
+}
+
+
+export function getPointInfoList(context is Context, definition is map) returns array
+{
+    var pointInfoList = [];
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        var refType = getEntityTypeBooleans(context, vertex.referenceSelection);
+
+        var point = getPointInfo(vertex, context, refType);
+
+        pointInfoList = append(pointInfoList, point);
+    }
+
+    return pointInfoList;
+}
+
+export function getEntityTypeBooleans(context is Context, entity is Query) returns map
+{
+    var entityType = { "isNothing" : false, "isBody" : false, "isPlanarFace" : false, "isNonPlanarFace" : false, "isEdge" : false, "isVertex" : false, "isMateConnector" : false };
+
+    if (isQueryEmpty(context, entity))
+    {
+        entityType.isNothing = true;
+    }
+
+    else
+    {
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.BODY)) != [])
+            entityType.isBody = true;
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.FACE)) != [])
+        {
+            if (isFacePlanar(context, entity))
+                entityType.isPlanarFace = true;
+
+            else
+                entityType.isNonPlanarFace = true;
+        }
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.EDGE)) != [])
+            entityType.isEdge = true;
+
+        if (evaluateQuery(context, qEntityFilter(entity, EntityType.VERTEX)) != [])
+            entityType.isVertex = true;
+
+        if (evaluateQuery(context, qBodyType(entity, BodyType.MATE_CONNECTOR)) != [])
+            entityType.isMateConnector = true;
+
+    }
+    return entityType;
+}
+
+export enum ReferenceType
+{
+    isNothing,
+    isVertex,
+    isEdge,
+    isNonPlanarFace,
+    isPlanarFace,
+    isMateConnector,
+}
+
+export function isFacePlanar(context is Context, face is Query) returns boolean
+{
+    var isPlanar;
+    try silent
+    {
+        evPlane(context, {
+                    "face" : face
+                });
+
+        isPlanar = true;
+    }
+    catch (error)
+    {
+        isPlanar = false;
+    }
+
+    return isPlanar;
+}
+
+
+//Creates a set of manipulators on a face for dragging a point around on it. If the face is planar it uses lengths. If it's non-planar it uses the UVW space of the surface.
+
+export function faceTangentManipulator(context is Context, definition is map, basePlane, zOffset is ValueWithUnits)
+{
+    var base = basePlane.origin;
+    var x = basePlane.x;
+    var y = yAxis(basePlane);
+    var z = basePlane.normal;
+
+    var xManip = linearManipulator({
+            "base" : base,
+            "direction" : x,
+            "offset" : 0 * inch,
+            "style" : ManipulatorStyleEnum.TANGENTIAL
+        });
+
+    var yManip = linearManipulator({
+            "base" : base,
+            "direction" : y,
+            "offset" : 0 * inch,
+            "style" : ManipulatorStyleEnum.TANGENTIAL
+        });
+
+    var zManip = linearManipulator({
+            "base" : base,
+            "direction" : z,
+            "offset" : zOffset,
+        });
+
+    try silent //here since 0 offset causes a warning
+    {
+        addDebugArrow(context, base, base + zOffset * z, 0 * inch, DebugColor.BLACK);
+    }
+
+    return { "xFaceTanManip" : xManip, "yFaceTanManip" : yManip, "zFaceTanManip" : zManip };
+}
+
+
+export function processFaceTangentManipulator(context is Context, definition is map, newManipulators)
+{
+    var vertexMap = definition.vertices[definition.pointIndex];
+    var refType = getEntityTypeBooleans(context, vertexMap.referenceSelection);
+
+    // what changed? making it more typeable/readable
+    var xChanged = newManipulators["xFaceTanManip"] is map;
+    var yChanged = newManipulators["yFaceTanManip"] is map;
+    var zChanged = newManipulators["zFaceTanManip"] is map;
+
+    if (xChanged || yChanged)
+    {
+        var m = xChanged ? newManipulators["xFaceTanManip"] : newManipulators["yFaceTanManip"];
+        var pos = m.base + m.direction * m.offset;
+
+
+        if (refType.isPlanarFace)
+        {
+            if (xChanged)
+                definition.vertices[definition.pointIndex].X += m.offset;
+
+            if (yChanged)
+                definition.vertices[definition.pointIndex].Y += m.offset;
+
+            return definition;
+        }
+        else
+        {
+            var distanceResult is DistanceResult = evDistance(context, { "side0" : pos, "side1" : definition.vertices[definition.pointIndex].referenceSelection });
+            var newParam = distanceResult.sides[1].parameter;
+            definition.vertices[definition.pointIndex].uParam = newParam[0];
+            definition.vertices[definition.pointIndex].vParam = newParam[1];
+            return definition;
+        }
+    }
+
+    if (zChanged)
+    {
+        if (refType.isPlanarFace)
+        {
+            definition.vertices[definition.pointIndex].Z = newManipulators["zFaceTanManip"].offset;
+        }
+        else
+        {
+            definition.vertices[definition.pointIndex].normalDistance = newManipulators["zFaceTanManip"].offset;
+        }
+        return definition;
+    }
+
+
+}
+
+export function getPointInfo(vertexDefinition is map, context is Context, refType is map) returns map
+{
+    var point;
+    var pointPlane;
+
+    if (refType.isNothing)
+    {
+        point = vector(vertexDefinition.X, vertexDefinition.Y, vertexDefinition.Z);
+        pointPlane = plane(point, Z_DIRECTION);
+    }
+
+    if (refType.isVertex || refType.isMateConnector)
+    {
+        var referenceLocation = evVertexPoint(context, {
+                "vertex" : vertexDefinition.referenceSelection
+            });
+
+        var normal = refType.isVertex ? Z_DIRECTION : evMateConnector(context, { "mateConnector" : vertexDefinition.referenceSelection }).zAxis;
+        point = referenceLocation + vector(vertexDefinition.X, vertexDefinition.Y, vertexDefinition.Z);
+        pointPlane = plane(point, normal);
+    }
+
+    if (refType.isEdge)
+    {
+        var edgeCurvature = evEdgeCurvature(context, {
+                "edge" : vertexDefinition.referenceSelection,
+                "parameter" : getCurveParameter(context, vertexDefinition)
+            });
+
+        point = edgeCurvature.frame.origin;
+
+        // makes a point plane on the curve where the plane normal matches the curve direction
+        pointPlane = plane(point, edgeCurvature.frame.zAxis, edgeCurvature.frame.xAxis);
+
+    }
+
+    if (refType.isPlanarFace)
+    {
+        pointPlane = evPlane(context, {
+                    "face" : vertexDefinition.referenceSelection
+                });
+        pointPlane.origin = toWorld(planeToCSys(pointPlane), vector(vertexDefinition.X, vertexDefinition.Y, 0 * inch));
+        point = pointPlane.origin;
+        point = point + pointPlane.normal * vertexDefinition.Z;
+    }
+
+    if (refType.isNonPlanarFace)
+    {
+        pointPlane = evFaceTangentPlane(context, {
+                    "face" : vertexDefinition.referenceSelection,
+                    "parameter" : vector(vertexDefinition.uParam, vertexDefinition.vParam)
+                });
+        point = pointPlane.origin;
+        point = point + pointPlane.normal * vertexDefinition.normalDistance;
+    }
+
+    return { "point" : point, "plane" : pointPlane };
+}
+
+export function createSymmetricPointsList(context is Context, definition is map, points is array) returns array
+{
+    var symmetricPoints = [];
+
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        //. WIP: adding symmetric points. need to get the param of the curve to invert it even if it's not a curve reference
+        if (vertex.symmetricPoint)
+        {
+
+            var tangentLine = evEdgeTangentLine(context, {
+                    "edge" : vertex.referenceSelection,
+                    "parameter" : 1 - getCurveParameter(context, vertex)
+                });
+
+            symmetricPoints = append(symmetricPoints, tangentLine.origin);
+
+        }
+    }
+
+
+
+    return symmetricPoints;
+}
+
+export function getSymmetricPointIndexMatch(context is Context, definition is map) returns map
+{
+    var indexMatchMap = {};
+    var symmetricIndex = -1;
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+
+        if (vertex.symmetricPoint)
+        {
+            symmetricIndex = symmetricIndex + 1;
+            indexMatchMap[i] = symmetricIndex;
+        }
+        else
+        {
+            indexMatchMap[i] = size(definition.vertices) + 1;
+        }
+
+    }
+    return indexMatchMap;
+}
+
+export function swapMap(Map is map) returns map
+{
+    var swappedMap = {};
+    for (var key, value in Map)
+    {
+        swappedMap[value] = key;
+    }
+    return swappedMap;
+}
+
+export function getCurveParameter(context is Context, vertexDefinition is map) returns number
+{
+    var parameter;
+    if (vertexDefinition.pointCreationType == PointCreationType.Parameter)
+    {
+        parameter = vertexDefinition.curveParameter;
+    }
+    else if (vertexDefinition.pointCreationType == PointCreationType.Distance)
+    {
+        const curveLength = evLength(context, { "entities" : vertexDefinition.referenceSelection });
+        parameter = clamp(vertexDefinition.curveDistance / curveLength, 0, 1);
+    }
+
+    if (vertexDefinition.curveFlip)
+    {
+        parameter = 1 - parameter;
+    }
+
+    return parameter;
+}
+
+function replacePointWithLineIfNecessary(id is Id, context is Context, definition is map, points is array) returns array
+{
+    var result = [];
+
+    for (var i = 0; i < size(definition.vertices); i += 1)
+    {
+        var vertex = definition.vertices[i];
+        var newEntry = points[i];
+
+        if (!isQueryEmpty(context, vertex.directionSelection))
+        {
+            var direction = extractDirection(context, vertex.directionSelection);
+            if (vertex.flipDirection)
+                direction = -direction;
+
+
+            // add a preview of the line
+            const farthestAlong = qFarthestAlong(qEverything(EntityType.BODY), direction);
+
+            var lineLength;
+
+            try silent // try to make the line go as far as the model
+            {
+                lineLength = evDistance(context, {
+                                "side0" : points[i],
+                                "side1" : farthestAlong,
+                                "maximum" : true
+                            }).distance;
+            }
+            catch (error) // if there's nothing in that direction it'll fail and we'll just make it the length of the bBox of everything in the context to size it with the model size
+            {
+                const bBox = evBox3d(context, { "topology" : qEverything(EntityType.BODY), "tight" : false });
+                lineLength = norm(bBox.minCorner - bBox.maxCorner);
+            }
+
+            const lineStart = points[i];
+            const lineEnd = points[i] + direction * lineLength;
+
+            opFitSpline(context, id + "fitSpline" + i, { "points" : [lineStart, lineEnd] });
+
+            newEntry = qCreatedBy(id + "fitSpline" + i, EntityType.BODY);
+
+            addDebugEntities(context, newEntry, DebugColor.YELLOW);
+        }
+
+        result = append(result, newEntry);
+    }
+
+    return result;
+}
+
+function getSplitParameters(context is Context, id is Id, definition is map, points is array) returns array
+{
+
+    const pointsAndLines = replacePointWithLineIfNecessary(id, context, definition, points);
+
+    var result = [];
+    var linesToDelete = [];
+
+    for (var pointOrLine in pointsAndLines)
+    {
+        const distResult = evDistance(context, { "side0" : pointOrLine, "side1" : definition.curve });
+        result = append(result, distResult.sides[1].parameter);
+
+        if (!tolerantEquals(distResult.sides[0].point, distResult.sides[1].point))
+        {
+            addDebugLine(context, distResult.sides[0].point, distResult.sides[1].point, DebugColor.MAGENTA);
+        }
+
+        if (pointOrLine is Query)
+        {
+            linesToDelete = append(linesToDelete, pointOrLine);
+        }
+    }
+
+    if (linesToDelete != [])
+    {
+        opDeleteBodies(context, id + "deleteLines", { "entities" : qUnion(linesToDelete) });
+    }
+
+    return result;
+}
+
+function doParametersSplitTheCurve(parameters is array) returns boolean
+{
+    for (var param in parameters)
+    {
+        if (!tolerantEquals(param, 1) && !tolerantEquals(param, 0))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
