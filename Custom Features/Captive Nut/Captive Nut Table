@@ -1,0 +1,1411 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1271;
+
+// This table was mostly copied from the the T-slot Joint feature made by Arul Suresh (@lemon1234 on the forums), with the addition of the counterbore dimensions and a few tweaks to adapt it. Many thanks, Arul, for the awesome features you've made!
+
+const ANSI_NPTable = {
+        "name" : "size",
+        "displayName" : "Screw Size",
+        "entries" : {
+                "#0" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0635 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0018 * inch", "cBore" : "1/8 * inch" },
+                                                                "Free" : { "holeD" : "0.0700 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0050 * inch", "cBore" : "1/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0635 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0018 * inch", "cBore" : "1/8 * inch" },
+                                                                "Free" : { "holeD" : "0.0700 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0050 * inch", "cBore" : "1/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#1" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0760 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0015 * inch", "cBore" : "5/32 * inch" },
+                                                                "Free" : { "holeD" : "0.0810 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0040 * inch", "cBore" : "5/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0760 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0015 * inch", "cBore" : "5/32 * inch" },
+                                                                "Free" : { "holeD" : "0.0810 * inch", "nutW" : "5/32 * inch", "nutT" : "3/64 * inch", "nutA" : "0.0040 * inch", "cBore" : "5/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#2" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0890 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0015 * inch", "cBore" : "3/16 * inch" },
+                                                                "Free" : { "holeD" : "0.0960 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0050 * inch", "cBore" : "3/16 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0890 * inch", "nutW" : "3/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0015 * inch", "cBore" : "3/16 * inch" },
+                                                                "Free" : { "holeD" : "0.0960 * inch", "nutW" : "3/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0050 * inch", "cBore" : "3/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.0890 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0015 * inch", "cBore" : "3/16 * inch" },
+                                                                "Free" : { "holeD" : "0.0960 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0050 * inch", "cBore" : "3/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#3" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1040 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0025 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1100 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0055 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1040 * inch", "nutW" : "3/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0025 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1100 * inch", "nutW" : "3/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1040 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0025 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1100 * inch", "nutW" : "3/16 * inch", "nutT" : "1/16 * inch", "nutA" : "0.0055 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#4" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1160 * inch", "nutW" : "1/4 * inch", "nutT" : "3/32 * inch", "nutA" : "0.0020 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1285 * inch", "nutW" : "1/4 * inch", "nutT" : "3/32 * inch", "nutA" : "0.0083 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1160 * inch", "nutW" : "1/4 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0020 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1285 * inch", "nutW" : "1/4 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0083 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1160 * inch", "nutW" : "1/4 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0020 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1285 * inch", "nutW" : "1/4 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0083 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1160 * inch", "nutW" : "1/4 * inch", "nutT" : "3/32 * inch", "nutA" : "0.0020 * inch", "cBore" : "7/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1285 * inch", "nutW" : "1/4 * inch", "nutT" : "3/32 * inch", "nutA" : "0.0083 * inch", "cBore" : "7/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#5" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1360 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "1/4 * inch" },
+                                                                "Free" : { "holeD" : "0.1405 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "1/4 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1360 * inch", "nutW" : "5/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "1/4 * inch" },
+                                                                "Free" : { "holeD" : "0.1405 * inch", "nutW" : "5/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "1/4 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1360 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "1/4 * inch" },
+                                                                "Free" : { "holeD" : "0.1405 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "1/4 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#6" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1440 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0030 * inch", "cBore" : "9/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1495 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0057 * inch", "cBore" : "9/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1440 * inch", "nutW" : "5/16 * inch", "nutT" : "11/64 * inch", "nutA" : "0.0030 * inch", "cBore" : "9/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1495 * inch", "nutW" : "5/16 * inch", "nutT" : "11/64 * inch", "nutA" : "0.0057 * inch", "cBore" : "9/32 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1440 * inch", "nutW" : "5/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0030 * inch", "cBore" : "9/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1495 * inch", "nutW" : "5/16 * inch", "nutT" : "9/64 * inch", "nutA" : "0.0057 * inch", "cBore" : "9/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1440 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0030 * inch", "cBore" : "9/32 * inch" },
+                                                                "Free" : { "holeD" : "0.1495 * inch", "nutW" : "5/16 * inch", "nutT" : "7/64 * inch", "nutA" : "0.0057 * inch", "cBore" : "9/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#8" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1695 * inch", "nutW" : "11/32 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0028 * inch", "cBore" : "5/16 * inch" },
+                                                                "Free" : { "holeD" : "0.1770 * inch", "nutW" : "11/32 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0065 * inch", "cBore" : "5/16 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1695 * inch", "nutW" : "11/32 * inch", "nutT" : "15/64 * inch", "nutA" : "0.0028 * inch", "cBore" : "5/16 * inch" },
+                                                                "Free" : { "holeD" : "0.1770 * inch", "nutW" : "11/32 * inch", "nutT" : "15/64 * inch", "nutA" : "0.0065 * inch", "cBore" : "5/16 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1695 * inch", "nutW" : "11/32 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0028 * inch", "cBore" : "5/16 * inch" },
+                                                                "Free" : { "holeD" : "0.1770 * inch", "nutW" : "11/32 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0065 * inch", "cBore" : "5/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1695 * inch", "nutW" : "11/32 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0028 * inch", "cBore" : "5/16 * inch" },
+                                                                "Free" : { "holeD" : "0.1770 * inch", "nutW" : "11/32 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0065 * inch", "cBore" : "5/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#10" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1960 * inch", "nutW" : "3/8 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0030 * inch", "cBore" : "3/8 * inch" },
+                                                                "Free" : { "holeD" : "0.2010 * inch", "nutW" : "3/8 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0055 * inch", "cBore" : "3/8 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1960 * inch", "nutW" : "3/8 * inch", "nutT" : "15/64 * inch", "nutA" : "0.0030 * inch", "cBore" : "3/8 * inch" },
+                                                                "Free" : { "holeD" : "0.2010 * inch", "nutW" : "3/8 * inch", "nutT" : "15/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "3/8 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1960 * inch", "nutW" : "3/8 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0030 * inch", "cBore" : "3/8 * inch" },
+                                                                "Free" : { "holeD" : "0.2010 * inch", "nutW" : "3/8 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0055 * inch", "cBore" : "3/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.1960 * inch", "nutW" : "3/8 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0030 * inch", "cBore" : "3/8 * inch" },
+                                                                "Free" : { "holeD" : "0.2010 * inch", "nutW" : "3/8 * inch", "nutT" : "1/8 * inch", "nutA" : "0.0055 * inch", "cBore" : "3/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "#12" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2210 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0025 * inch", "cBore" : "13/32 * inch" },
+                                                                "Free" : { "holeD" : "0.2280 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0060 * inch", "cBore" : "13/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2210 * inch", "nutW" : "7/16 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0025 * inch", "cBore" : "13/32 * inch" },
+                                                                "Free" : { "holeD" : "0.2280 * inch", "nutW" : "7/16 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0060 * inch", "cBore" : "13/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2210 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0025 * inch", "cBore" : "13/32 * inch" },
+                                                                "Free" : { "holeD" : "0.2280 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0060 * inch", "cBore" : "13/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "1/4" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                                "Jam" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "5/32 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.2570 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0035 * inch", "cBore" : "7/16 * inch" },
+                                                                "Free" : { "holeD" : "0.2660 * inch", "nutW" : "7/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0080 * inch", "cBore" : "7/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "5/16" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "1/2 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "1/2 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                                "Jam" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "1/2 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "1/2 * inch", "nutT" : "3/16 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "1/2 * inch", "nutT" : "11/32 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "1/2 * inch", "nutT" : "11/32 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "1/2 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "1/2 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3230 * inch", "nutW" : "9/16 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0053 * inch", "cBore" : "17/32 * inch" },
+                                                                "Free" : { "holeD" : "0.3320 * inch", "nutW" : "9/16 * inch", "nutT" : "17/64 * inch", "nutA" : "0.0098 * inch", "cBore" : "17/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "3/8" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "5/8 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "5/8 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "9/16 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "9/16 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                                "Jam" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "9/16 * inch", "nutT" : "7/32 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "9/16 * inch", "nutT" : "29/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "9/16 * inch", "nutT" : "29/64 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "9/16 * inch", "nutT" : "9/16 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "9/16 * inch", "nutT" : "9/16 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Machine Screw" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "5/8 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "5/8 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.3860 * inch", "nutW" : "5/8 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0055 * inch", "cBore" : "5/8 * inch" },
+                                                                "Free" : { "holeD" : "0.3970 * inch", "nutW" : "5/8 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0110 * inch", "cBore" : "5/8 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "7/16" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.4531 * inch", "nutW" : "11/16 * inch", "nutT" : "3/8 * inch", "nutA" : "0.0078 * inch", "cBore" : "23/32 * inch" },
+                                                                "Free" : { "holeD" : "0.4687 * inch", "nutW" : "11/16 * inch", "nutT" : "3/8 * inch", "nutA" : "0.0156 * inch", "cBore" : "23/32 * inch" },
+                                                            }
+                                                    },
+                                                "Jam" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.4531 * inch", "nutW" : "11/16 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0078 * inch", "cBore" : "23/32 * inch" },
+                                                                "Free" : { "holeD" : "0.4687 * inch", "nutW" : "11/16 * inch", "nutT" : "1/4 * inch", "nutA" : "0.0156 * inch", "cBore" : "23/32 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.4531 * inch", "nutW" : "11/16 * inch", "nutT" : "29/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "23/32 * inch" },
+                                                                "Free" : { "holeD" : "0.4687 * inch", "nutW" : "11/16 * inch", "nutT" : "29/64 * inch", "nutA" : "0.0156 * inch", "cBore" : "23/32 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.4531 * inch", "nutW" : "11/16 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "23/32 * inch" },
+                                                                "Free" : { "holeD" : "0.4687 * inch", "nutW" : "11/16 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0156 * inch", "cBore" : "23/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.4531 * inch", "nutW" : "3/4 * inch", "nutT" : "3/8 * inch", "nutA" : "0.0078 * inch", "cBore" : "23/32 * inch" },
+                                                                "Free" : { "holeD" : "0.4687 * inch", "nutW" : "3/4 * inch", "nutT" : "3/8 * inch", "nutA" : "0.0156 * inch", "cBore" : "23/32 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "1/2" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.5156 * inch", "nutW" : "3/4 * inch", "nutT" : "7/16 * inch", "nutA" : "0.0078 * inch", "cBore" : "13/16 * inch" },
+                                                                "Free" : { "holeD" : "0.5312 * inch", "nutW" : "3/4 * inch", "nutT" : "7/16 * inch", "nutA" : "0.0156 * inch", "cBore" : "13/16 * inch" },
+                                                            }
+                                                    },
+                                                "Jam" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.5156 * inch", "nutW" : "3/4 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0078 * inch", "cBore" : "13/16 * inch" },
+                                                                "Free" : { "holeD" : "0.5312 * inch", "nutW" : "3/4 * inch", "nutT" : "5/16 * inch", "nutA" : "0.0156 * inch", "cBore" : "13/16 * inch" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.5156 * inch", "nutW" : "3/4 * inch", "nutT" : "19/32 * inch", "nutA" : "0.0078 * inch", "cBore" : "13/16 * inch" },
+                                                                "Free" : { "holeD" : "0.5312 * inch", "nutW" : "3/4 * inch", "nutT" : "19/32 * inch", "nutA" : "0.0156 * inch", "cBore" : "13/16 * inch" },
+                                                            }
+                                                    },
+                                                "Thin Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.5156 * inch", "nutW" : "3/4 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0078 * inch", "cBore" : "13/16 * inch" },
+                                                                "Free" : { "holeD" : "0.5312 * inch", "nutW" : "3/4 * inch", "nutT" : "21/64 * inch", "nutA" : "0.0156 * inch", "cBore" : "13/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "0.5156 * inch", "nutW" : "13/16 * inch", "nutT" : "7/16 * inch", "nutA" : "0.0078 * inch", "cBore" : "13/16 * inch" },
+                                                                "Free" : { "holeD" : "0.5312 * inch", "nutW" : "13/16 * inch", "nutT" : "7/16 * inch", "nutA" : "0.0156 * inch", "cBore" : "13/16 * inch" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+            }
+    };
+
+
+const ISO_NPTable = {
+        "name" : "size",
+        "displayName" : "Screw Size",
+        "entries" : {
+                "M1.6" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "1.70 * millimeter", "nutW" : "3.2 * millimeter", "nutT" : "1.3 * millimeter", "nutA" : "0.050 * millimeter", "cBore" : "3.50 * millimeter" },
+                                                                "Free" : { "holeD" : "1.75 * millimeter", "nutW" : "3.2 * millimeter", "nutT" : "1.3 * millimeter", "nutA" : "0.075 * millimeter", "cBore" : "3.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M2" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "2.10 * millimeter", "nutW" : "4.0 * millimeter", "nutT" : "1.6 * millimeter", "nutA" : "0.050 * millimeter", "cBore" : "4.40 * millimeter" },
+                                                                "Free" : { "holeD" : "2.20 * millimeter", "nutW" : "4.0 * millimeter", "nutT" : "1.6 * millimeter", "nutA" : "0.100 * millimeter", "cBore" : "4.40 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M2.5" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "2.65 * millimeter", "nutW" : "5.0 * millimeter", "nutT" : "2.0 * millimeter", "nutA" : "0.075 * millimeter", "cBore" : "5.40 * millimeter" },
+                                                                "Free" : { "holeD" : "2.75 * millimeter", "nutW" : "5.0 * millimeter", "nutT" : "2.0 * millimeter", "nutA" : "0.125 * millimeter", "cBore" : "5.40 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M3" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "3.15 * millimeter", "nutW" : "5.5 * millimeter", "nutT" : "2.4 * millimeter", "nutA" : "0.075 * millimeter", "cBore" : "6.50 * millimeter" },
+                                                                "Free" : { "holeD" : "3.30 * millimeter", "nutW" : "5.5 * millimeter", "nutT" : "2.4 * millimeter", "nutA" : "0.150 * millimeter", "cBore" : "6.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "3.15 * millimeter", "nutW" : "5.5 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.075 * millimeter", "cBore" : "6.50 * millimeter" },
+                                                                "Free" : { "holeD" : "3.30 * millimeter", "nutW" : "5.5 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.150 * millimeter", "cBore" : "6.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M4" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "4.20 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "3.2 * millimeter", "nutA" : "0.100 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                                "Free" : { "holeD" : "4.40 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "3.2 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "4.20 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.100 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                                "Free" : { "holeD" : "4.40 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "4.20 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "3.2 * millimeter", "nutA" : "0.100 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                                "Free" : { "holeD" : "4.40 * millimeter", "nutW" : "7.0 * millimeter", "nutT" : "3.2 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "8.25 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M5" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "5.25 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.125 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                                "Free" : { "holeD" : "5.50 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "5.25 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.125 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                                "Free" : { "holeD" : "5.50 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "5.25 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.125 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                                "Free" : { "holeD" : "5.50 * millimeter", "nutW" : "8.0 * millimeter", "nutT" : "4.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "9.75 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M6" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "6.30 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.150 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                                "Free" : { "holeD" : "6.60 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "6.30 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "6.0 * millimeter", "nutA" : "0.150 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                                "Free" : { "holeD" : "6.60 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "6.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "6.30 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.150 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                                "Free" : { "holeD" : "6.60 * millimeter", "nutW" : "10.0 * millimeter", "nutT" : "5.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "11.20 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M7" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "7.40 * millimeter", "nutW" : "11.0 * millimeter", "nutT" : "5.5 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "12.75 * millimeter" },
+                                                                "Free" : { "holeD" : "7.70 * millimeter", "nutW" : "11.0 * millimeter", "nutT" : "5.5 * millimeter", "nutA" : "0.350 * millimeter", "cBore" : "12.75 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M8" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "8.40 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "6.5 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                                "Free" : { "holeD" : "8.80 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "6.5 * millimeter", "nutA" : "0.400 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "8.40 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                                "Free" : { "holeD" : "8.80 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.400 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "8.40 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "6.5 * millimeter", "nutA" : "0.200 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                                "Free" : { "holeD" : "8.80 * millimeter", "nutW" : "13.0 * millimeter", "nutT" : "6.5 * millimeter", "nutA" : "0.400 * millimeter", "cBore" : "14.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M10" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "10.50 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                                "Free" : { "holeD" : "11.00 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "10.50 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                                "Free" : { "holeD" : "11.00 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "10.50 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.250 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                                "Free" : { "holeD" : "11.00 * millimeter", "nutW" : "17.0 * millimeter", "nutT" : "8.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "17.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M12" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "12.60 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                                "Free" : { "holeD" : "13.20 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.600 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "12.60 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "12.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                                "Free" : { "holeD" : "13.20 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "12.0 * millimeter", "nutA" : "0.600 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "12.60 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.300 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                                "Free" : { "holeD" : "13.20 * millimeter", "nutW" : "19.0 * millimeter", "nutT" : "10.0 * millimeter", "nutA" : "0.600 * millimeter", "cBore" : "19.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M14" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "14.75 * millimeter", "nutW" : "22.0 * millimeter", "nutT" : "11.0 * millimeter", "nutA" : "0.375 * millimeter", "cBore" : "22.50 * millimeter" },
+                                                                "Free" : { "holeD" : "15.50 * millimeter", "nutW" : "22.0 * millimeter", "nutT" : "11.0 * millimeter", "nutA" : "0.750 * millimeter", "cBore" : "22.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "14.75 * millimeter", "nutW" : "22.0 * millimeter", "nutT" : "14.0 * millimeter", "nutA" : "0.375 * millimeter", "cBore" : "22.50 * millimeter" },
+                                                                "Free" : { "holeD" : "15.50 * millimeter", "nutW" : "22.0 * millimeter", "nutT" : "14.0 * millimeter", "nutA" : "0.750 * millimeter", "cBore" : "22.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M16" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "16.75 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "13.0 * millimeter", "nutA" : "0.375 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                                "Free" : { "holeD" : "17.50 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "13.0 * millimeter", "nutA" : "0.750 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "16.75 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "0.375 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                                "Free" : { "holeD" : "17.50 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "0.750 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "16.75 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "13.0 * millimeter", "nutA" : "0.375 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                                "Free" : { "holeD" : "17.50 * millimeter", "nutW" : "24.0 * millimeter", "nutT" : "13.0 * millimeter", "nutA" : "0.750 * millimeter", "cBore" : "25.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M18" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "19.00 * millimeter", "nutW" : "27.0 * millimeter", "nutT" : "15.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "28.50 * millimeter" },
+                                                                "Free" : { "holeD" : "20.00 * millimeter", "nutW" : "27.0 * millimeter", "nutT" : "15.0 * millimeter", "nutA" : "1.000 * millimeter", "cBore" : "28.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "19.00 * millimeter", "nutW" : "27.0 * millimeter", "nutT" : "18.5 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "28.50 * millimeter" },
+                                                                "Free" : { "holeD" : "20.00 * millimeter", "nutW" : "27.0 * millimeter", "nutT" : "18.5 * millimeter", "nutA" : "1.000 * millimeter", "cBore" : "28.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+                "M20" : {
+                        "name" : "shape",
+                        "displayName" : "Nut Shape",
+                        "entries" : {
+                                "Hex" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "21.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                                "Free" : { "holeD" : "22.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "1.000 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                            }
+                                                    },
+                                                "Nylock" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "21.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "20.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                                "Free" : { "holeD" : "22.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "20.0 * millimeter", "nutA" : "1.000 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                                "Square" : {
+                                        "name" : "type",
+                                        "displayName" : "Nut Type",
+                                        "entries" : {
+                                                "Regular" : {
+                                                        "name" : "fit",
+                                                        "displayName" : "Fit",
+                                                        "default" : "Free",
+                                                        "entries" : {
+                                                                "Close" : { "holeD" : "21.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "0.500 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                                "Free" : { "holeD" : "22.00 * millimeter", "nutW" : "30.0 * millimeter", "nutT" : "16.0 * millimeter", "nutA" : "1.000 * millimeter", "cBore" : "31.50 * millimeter" },
+                                                            }
+                                                    },
+                                            }
+                                    },
+                            }
+                    },
+            }
+    };
+export const Custom_NPTable = {
+        "name" : "shape",
+        "displayName" : "Nut Shape",
+        "entries" : {
+                "Hex" : "Hex",
+                "Square" : "Square"
+            }
+    };
+
+export const nutPocketTable = {
+        "name" : "standard",
+        "displayName" : "Standard",
+        "default" : "ANSI",
+        "entries" : {
+                "Custom" : Custom_NPTable,
+                "ANSI" : ANSI_NPTable,
+                "ISO" : ISO_NPTable
+            }
+    };
