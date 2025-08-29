@@ -1,0 +1,190 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1691;
+export import(path : "onshape/std/geometry.fs", version : "1691.0");
+export import(path : "71cd4af85f7e1cb5dfdef641", version : "256568465e31c78e6a6a3bbe");
+
+
+export enum profileShape
+{
+    Circle,
+    Rectangle,
+    Polygon,
+    Custom,
+}
+
+
+annotation { "Feature Type Name" : "Profile Sweeper" }
+export const profileSweeper = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        booleanStepTypePredicate(definition);
+
+        annotation { "Name" : "Curves", "Filter" : EntityType.EDGE || (EntityType.BODY && BodyType.WIRE) }
+        definition.curves is Query;
+
+        annotation { "Name" : "Tangent propagation", "Default" : true, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.tangentPropagation is boolean;
+
+        annotation { "Name" : "Profile shape", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.profileShape is profileShape;
+
+        if (definition.profileShape == profileShape.Circle || definition.profileShape == profileShape.Polygon)
+        {
+            annotation { "Name" : "Diameter", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isLength(definition.diameter, LENGTH_BOUNDS);
+        }
+
+        if (definition.profileShape == profileShape.Polygon)
+        {
+            annotation { "Name" : "Sides", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isInteger(definition.sides, { (unitless) : [3, 6, 1e6] } as IntegerBoundSpec);
+        }
+
+        if (definition.profileShape == profileShape.Rectangle)
+        {
+            annotation { "Name" : "Width", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isLength(definition.width, LENGTH_BOUNDS);
+
+            annotation { "Name" : "length", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isLength(definition.length, LENGTH_BOUNDS);
+        }
+
+        if (definition.profileShape == profileShape.Custom)
+        {
+            referenceInput(definition);
+        }
+
+        if (definition.profileShape != profileShape.Circle)
+        {
+            annotation { "Name" : "Angle", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+            isAngle(definition.angle, ANGLE_360_ZERO_DEFAULT_BOUNDS);
+
+            annotation { "Name" : "Flip angle", "UIHint" : [UIHint.OPPOSITE_DIRECTION_CIRCULAR, UIHint.REMEMBER_PREVIOUS_VALUE] }
+            definition.flipAngle is boolean;
+        }
+
+        booleanStepScopePredicate(definition);
+    }
+    {
+        verifyNonemptyQuery(context, definition, "curves", "Select curves");
+
+        var inputCurves = dissolveWires(definition.curves);
+        if (definition.tangentPropagation)
+        {
+            inputCurves = qTangentConnectedEdges(inputCurves);
+        }
+
+        var remainingTransform = getRemainderPatternTransform(context,
+        {
+                "references" : inputCurves
+            });
+
+        opExtractWires(context, id + "opExtractWires", { "edges" : inputCurves });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        var compositeCurves = qCreatedBy(id + "opExtractWires", EntityType.BODY);
+
+        forEachEntity(context, id + "makeSweeps", compositeCurves, function(curve is Query, id is Id)
+            {
+                var i = 0;
+                i += 1;
+                var curves = dissolveWires(curve);
+                var path = constructPath(context, curves);
+                var start = evPathTangentLines(context, path, [0]).tangentLines[0];
+                var startOrigin = start.origin;
+                var startNormal = start.direction;
+                var startPlane = plane(startOrigin, startNormal);
+                var planeX = startPlane.x;
+                var angle = definition.flipAngle ? 360 * degree - definition.angle : definition.angle;
+                var rotatedXtransform = rotationMatrix3d(startNormal, angle);
+                var rotatedX = rotatedXtransform * (planeX * inch);
+                startPlane = plane(startOrigin, startNormal, rotatedX);
+
+                var profile;
+                if (definition.profileShape == profileShape.Custom)
+                {
+                    var profileTransform = toWorld(coordSystem(startOrigin, rotatedX, startNormal));
+                    var facesToTransform;
+                    if (definition.sameStudio)
+                    {
+                        facesToTransform = definition.customStudioProfile;
+                    }
+                    else
+                    {
+                        const instantiator = newInstantiator(id + "customFace");
+                        addInstance(instantiator, definition.customProfile, {
+                                });
+                        instantiate(context, instantiator);
+                        facesToTransform = qCreatedBy(id + "customFace", EntityType.FACE);
+                    }
+
+                    opPattern(context, id + "pattern1", {
+                                "entities" : facesToTransform,
+                                "transforms" : [profileTransform],
+                                "instanceNames" : ["customProfile" ~ i]
+                            });
+
+                    profile = qCreatedBy(id + "pattern1", EntityType.FACE);
+                    
+                }
+                else
+                {
+                    var sketch = newSketchOnPlane(context, id + "sketch", { "sketchPlane" : startPlane });
+
+                    if (definition.profileShape == profileShape.Circle)
+                    {
+                        skCircle(sketch, "circle", {
+                                    "center" : vector(0, 0) * inch,
+                                    "radius" : definition.diameter / 2
+                                });
+                    }
+
+                    if (definition.profileShape == profileShape.Polygon)
+                    {
+                        skRegularPolygon(sketch, "polygon", {
+                                    "center" : vector(0, 0) * inch,
+                                    "firstVertex" : vector(0 * inch, definition.diameter / 2),
+                                    "sides" : definition.sides
+                                });
+                    }
+
+                    if (definition.profileShape == profileShape.Rectangle)
+                    {
+                        skRectangle(sketch, "rectangle", {
+                                    "firstCorner" : vector(definition.width / 2, definition.length / 2),
+                                    "secondCorner" : vector(-definition.width / 2, -definition.length / 2)
+                                });
+                    }
+                    skSolve(sketch);
+                    profile = qEntityFilter(qCreatedBy(id + "sketch"), EntityType.FACE);
+                }
+
+
+                // sweep the profile
+                opSweep(context, id + "sweep", {
+                            "profiles" : profile,
+                            "path" : qUnion(path.edges)
+                        });
+
+                var wireBody = qCreatedBy(id + "sweep", EntityType.BODY);
+
+                // delete sketch entities
+                var bodiesToDelete = definition.profileShape == profileShape.Custom ? qUnion([profile, qCreatedBy(id + "customFace")]) : qCreatedBy(id + "sketch");
+                opDeleteBodies(context, id + "deleteBodies", {
+                            "entities" : bodiesToDelete
+                        });
+            });
+
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+        // delete composite curves
+        opDeleteBodies(context, id + "deleteBodies1", {
+                    "entities" : compositeCurves
+                });
+
+    });
