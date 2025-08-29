@@ -1,0 +1,106 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2105;
+import(path : "onshape/std/common.fs", version : "2105.0");
+
+
+
+export enum EmitterShape
+{
+    annotation { "Name" : "Fan" }
+    FAN,
+    annotation { "Name" : "Cone (structured)" }
+    CONE_STRUCTURED,
+    annotation { "Name" : "Cone (randomized)" }
+    CONE_RANDOM,
+}
+
+export enum RayColor // declaring these so the UI looks nicer (It will read "Green" not "GREEN") and the order is more rainbow.
+{
+    annotation { "Name" : "Red" }
+    RED,
+    annotation { "Name" : "Orange" }
+    ORANGE,
+    annotation { "Name" : "Yellow" }
+    YELLOW,
+    annotation { "Name" : "Green" }
+    GREEN,
+    annotation { "Name" : "Cyan" }
+    CYAN,
+    annotation { "Name" : "Blue" }
+    BLUE,
+    annotation { "Name" : "Magenta" }
+    MAGENTA,
+    annotation { "Name" : "Black" }
+    BLACK,
+}
+
+export enum RayTracerMode
+{
+    annotation { "Name" : "Assign properties" }
+    SETUP,
+    annotation { "Name" : "Ray trace" }
+    TRACE
+}
+
+export enum RayTracerObjectBounceType
+{
+    Transparent,
+    Mirror,
+    Opaque
+}
+
+export enum EmitterMode
+{
+    Point,
+    Curve,
+    Area
+}
+
+export const ROUGHNESS_BOUNDS = { (unitless) : [0, 0.2, 1] } as RealBoundSpec;
+
+export const ZERO_DEFAULT_ROUGHNESS_BOUNDS = { (unitless) : [0, 0, 1] } as RealBoundSpec;
+
+export const EXIT_LENGTH_BOUNDS =
+{
+            (meter) : [-500, 0.10, 500],
+            (centimeter) : 2.5 * 4,
+            (millimeter) : 25.0 * 4,
+            (inch) : 1.0 * 4,
+            (foot) : 0.5,
+            (yard) : 0.025 * 4
+        } as LengthBoundSpec;
+
+export const roughnessDescription = "Roughness adds randomness to the direction of rays that interact with the object. A value of 0 is smooth and predictable, like polished glass. A value of 1 scatters light, like a frosted surface. A value of 0.5 could approximate a satin finish.";
+export const roughnessSeedDescription = "Change the seed value to shuffle the randomness of the roughness.";
+
+export enum opticsFeatureMenu
+{
+    Emitters,
+    Parts,
+    Rays,
+    Targets,
+    // Settings
+}
+
+export enum RayGroupLevel
+{
+    Rays,
+    Emitters,
+    All
+}
+
+export const rayColorMap = 
+{
+    RayColor.RED : color(1, 0, 0),
+    RayColor.ORANGE : color(1, .5, 0),
+    RayColor.YELLOW : color(1, 1, 0),
+    RayColor.GREEN : color(0, 1, 0),
+    RayColor.CYAN : color(0, 1, 1),
+    RayColor.BLUE : color(0, 0, 1),
+    RayColor.MAGENTA : color(1, 0, 1),
+    RayColor.BLACK : color(0, 0, 0),
+};
+
+
