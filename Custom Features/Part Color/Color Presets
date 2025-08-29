@@ -1,0 +1,341 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1711;
+import(path : "onshape/std/geometry.fs", version : "1711.0");
+
+
+export enum ColorPreset
+{
+    Basic,
+    Grey,
+    Wood,
+    Metal
+}
+
+export enum basicOption
+{
+    Dark,
+    Neutral,
+    Light,
+    Highlighter
+}
+
+export enum greyOption
+{
+    Cool,
+    Neutral,
+    Warm
+}
+
+export enum basicColor
+{
+    Red,
+
+    Coral,
+
+    Orange,
+
+    Tangerine,
+
+    Yellow,
+
+    Lime,
+
+    Green,
+
+    Turquoise,
+
+    Blue,
+
+    Blurple,
+
+    Purple,
+
+    Magenta,
+}
+
+export enum greyColor
+{
+    White,
+    annotation { "Name" : "10%" }
+    Ten,
+    annotation { "Name" : "20%" }
+    Twenty,
+    annotation { "Name" : "30%" }
+    Thirty,
+    annotation { "Name" : "40%" }
+    Fourty,
+    annotation { "Name" : "50%" }
+    Fifty,
+    annotation { "Name" : "60%" }
+    Sixty,
+    annotation { "Name" : "70%" }
+    Seventy,
+    annotation { "Name" : "80%" }
+    Eighty,
+    annotation { "Name" : "90%" }
+    Ninty,
+    Black
+}
+
+export enum woodColor
+{
+    Ash,
+
+    Birch,
+
+    Cherry,
+
+    Cypress,
+
+    Ebony,
+
+    Elm,
+
+    Hickory,
+
+    Mahogany,
+
+    Oak,
+
+    Pine,
+
+    Poplar,
+
+    Walnut,
+}
+
+export enum metalColor
+{
+    Aluminum,
+
+    Brass,
+
+    Bronze,
+
+    Copper,
+
+    Gold,
+
+    Silver,
+
+    Steel,
+}
+
+
+
+
+
+export const colorPresetHexCode =
+{
+        // Basic Colors
+
+        "Red" : "D22D2D",
+
+        "Coral" : "D2622D",
+
+        "Orange" : "D98826",
+
+        "Tangerine" : "D9B126",
+
+        "Yellow" : "D9D926",
+
+        "Lime" : "91D22D",
+
+        "Green" : "2DD22D",
+
+        "Turquoise" : "2DD2A4",
+
+        "Blue" : "2D2DD2",
+
+        "Blurple" : "5D2DD2",
+
+        "Purple" : "802DD2",
+
+        "Magenta" : "DA1F89",
+
+        // dark colors
+
+        "darkRed" : "A60505",
+
+        "darkCoral" : "AA3C08",
+
+        "darkOrange" : "B4670B",
+
+        "darkTangerine" : "B28B04",
+
+        "darkYellow" : "B3B302",
+
+        "darkLime" : "6AAC05",
+
+        "darkGreen" : "098509",
+
+        "darkTurquoise" : "0CB082",
+
+        "darkBlue" : "1010B8",
+
+        "darkBlurple" : "434389",
+
+        "darkPurple" : "5B4288",
+
+        "darkMagenta" : "B10F6B",
+
+        // light colors
+
+        "lightRed" : "FE5555",
+
+        "lightCoral" : "F9854E",
+
+        "lightOrange" : "FAB157",
+
+        "lightTangerine" : "F6D152",
+
+        "lightYellow" : "FBFB64",
+
+        "lightLime" : "BCFA5C",
+
+        "lightGreen" : "5CFB5C",
+
+        "lightTurquoise" : "52F6C8",
+
+        "lightBlue" : "5353F6",
+
+        "lightBlurple" : "804CFF",
+
+        "lightPurple" : "A64CFF",
+
+        "lightMagenta" : "FF4CAC",
+
+        // highlighter colors
+
+        "HLRed" : "FF0000",
+
+        "HLCoral" : "FF5200",
+
+        "HLOrange" : "FF8C00",
+
+        "HLTangerine" : "FFC600",
+
+        "HLYellow" : "FFFF00",
+
+        "HLLime" : "9AFF00",
+
+        "HLGreen" : "00FF00",
+
+        "HLTurquoise" : "00FFB7",
+
+        "HLBlue" : "0000FF",
+
+        "HLBlurple" : "4A00FF",
+
+        "HLPurple" : "8000FF",
+
+        "HLMagenta" : "FF0097",
+
+        // Greys
+
+        "Black" : "000000",
+
+        "White" : "ffffff",
+
+        // cool greys
+        "CG10" : "DDE0E4",
+
+        "CG20" : "C2C8CE",
+
+        "CG30" : "ABB0B7",
+
+        "CG40" : "92979E",
+
+        "CG50" : "7A7F86",
+
+        "CG60" : "61666D",
+
+        "CG70" : "494F55",
+
+        "CG80" : "31363D",
+
+        "CG90" : "191E25",
+
+        // neutral greys
+        "NG10" : "E6E6E6",
+
+        "NG20" : "CCCCCC",
+
+        "NG30" : "B3B3B3",
+
+        "NG40" : "999999",
+
+        "NG50" : "808080",
+
+        "NG60" : "666666",
+
+        "NG70" : "4D4D4D",
+
+        "NG80" : "333333",
+
+        "NG90" : "1A1A1A",
+
+        // warm greys
+        "WG10" : "E9E2D8",
+
+        "WG20" : "CEC9C2",
+
+        "WG30" : "B7B1AB",
+
+        "WG40" : "9E9992",
+
+        "WG50" : "86817A",
+
+        "WG60" : "6D6861",
+
+        "WG70" : "555049",
+
+        "WG80" : "3D3731",
+
+        "WG90" : "252019",
+
+        // Wood
+
+        "Ash" : "9D9995",
+
+        "Birch" : "CAAE8A",
+
+        "Cherry" : "B46B30",
+
+        "Cypress" : "BEBAAA",
+
+        "Ebony" : "2A1D13",
+
+        "Elm" : "BB8A44",
+
+        "Hickory" : "A68963",
+
+        "Mahogany" : "662811",
+
+        "Oak" : "A67A3D",
+
+        "Pine" : "F0E2B3",
+
+        "Poplar" : "A29267",
+
+        "Walnut" : "624937",
+
+        // metal
+
+        "Aluminum" : "BCBEC5",
+
+        "Brass" : "B87246",
+
+        "Bronze" : "7B4C09",
+
+        "Copper" : "A13F16",
+
+        "Gold" : "D8A11E",
+
+        "Silver" : "E1E2EB",
+
+        "Steel" : "7B7E9D",
+
+    };
