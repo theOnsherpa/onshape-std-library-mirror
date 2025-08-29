@@ -1,0 +1,83 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2695;
+import(path : "onshape/std/common.fs", version : "2695.0");
+icon::import(path : "6a6b4ab690bf536dd4c5af1e", version : "86193dc4459b9695513a5110");
+
+export enum RegenTimerSetting
+{
+    Start,
+    Stop
+}
+
+
+annotation { "Feature Type Name" : "Regen timer",
+        "Feature Name Template" : "#timerName: #settingName",
+        "Feature Type Description" : "Measures regeneration time elapsed between a start and end point in the feature tree, allowing for evaluation of the time it takes for just one folder of feature to regenerate. This allows for very granular understanding of regeneration times when a lot of relatively quick features still add up to a meaningful amount of time.",
+        "Editing Logic Function" : "regenTimerEditingLogic",
+        "Icon" : icon::BLOB_DATA
+    }
+export const regenTimer = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Setting", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.setting is RegenTimerSetting;
+
+        annotation { "Name" : "Setting name", "UIHint" : UIHint.ALWAYS_HIDDEN, "Default" : "start" }
+        definition.settingName is string;
+
+        annotation { "Name" : "Timer name", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        definition.timerName is string;
+
+        if (definition.setting == RegenTimerSetting.Start)
+        {
+            annotation { "Name" : "Reset start time" }
+            isButton(definition.reset);
+
+            annotation { "Name" : "Something to change", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            definition.somethingToChange is boolean;
+        }
+
+    }
+    {
+        if (definition.setting == RegenTimerSetting.Start)
+        {
+            startTimer(definition.timerName);
+        }
+
+        else if (definition.setting == RegenTimerSetting.Stop)
+        {
+            try
+            {
+                printTimer(definition.timerName);
+            }
+            catch (error)
+            {
+                throw regenError("No timer named \"" ~ definition.timerName ~ "\" was found.");
+            }
+        }
+    });
+
+export function regenTimerEditingLogic(context is Context, id is Id,
+    oldDefinition is map, definition is map, isCreating is boolean, clickedButton is string) returns map
+{
+    if (clickedButton == "reset")
+    {
+        definition.somethingToChange = !definition.somethingToChange;
+        return definition;
+    }
+
+    if (definition.setting == RegenTimerSetting.Start)
+    {
+        definition.settingName = "start";
+        return definition;
+    }
+
+    if (definition.setting == RegenTimerSetting.Stop)
+    {
+        definition.settingName = "stop";
+        return definition;
+    }
+
+}
