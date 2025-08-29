@@ -1,0 +1,336 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1389;
+export import(path : "onshape/std/geometry.fs", version : "1389.0");
+icon::import(path : "0896268e8dfac5415c9d6bef", version : "320610db13df039eca99f8bb");
+
+annotation { "Feature Type Name" : "Selection Draft", "Icon" : icon::BLOB_DATA }
+export const selectionDraft = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Pause regeneration", "Default" : true }
+        definition.pause is boolean;
+
+        annotation { "Name" : "Neutral plane",
+                    "Filter" : QueryFilterCompound.ALLOWS_PLANE,
+                    "MaxNumberOfPicks" : 1 }
+        definition.neutralPlane is Query;
+
+        annotation { "Name" : "Specify pull direction" }
+        definition.directionBool is boolean;
+        if (definition.directionBool)
+        {
+            annotation { "Name" : "Direction", "Filter" : QueryFilterCompound.ALLOWS_DIRECTION }
+            definition.direction is Query;
+        }
+
+        annotation { "Name" : "Build a selection", "Item name" : "Selection", "Item label template" : "Selection input", "UIHint" : "ALLOW_QUERY_ORDER" }
+        definition.seeds is array;
+        for (var seed in definition.seeds)
+        {
+
+            annotation { "Name" : "Boolean type", "UIHint" : "HORIZONTAL_ENUM", "UIHint" : "SHOW_LABEL" }
+            seed.inclType is inclusionType;
+            annotation { "Name" : "Selection seed type", "UIHint" : "HORIZONTAL_ENUM", "UIHint" : "SHOW_LABEL" }
+            seed.selType is selectionType;
+
+            if (seed.selType == selectionType.FACE)
+            {
+                annotation { "Name" : "Selection method" }
+                seed.faceSelection is faceSelection;
+
+                if (seed.faceSelection == faceSelection.BOUNDED)
+                {
+                    annotation { "Name" : "Bounded face", "Filter" : EntityType.FACE, "MaxNumberOfPicks" : 1 }
+                    seed.bounded is Query;
+                    annotation { "Name" : "Bounding entities", "Filter" : EntityType.FACE || EntityType.EDGE }
+                    seed.bounding is Query;
+                }
+                else
+                {
+                    annotation { "Name" : "Seed faces", "Filter" : EntityType.FACE }
+                    seed.faces is Query;
+                }
+                if (seed.faceSelection == faceSelection.PARALLEL || seed.faceSelection == faceSelection.PERPINDICULAR)
+                {
+                    annotation { "Name" : "tolerance +/-" }
+                    isAngle(seed.directionTol, { (degree) : [0, 0, 360] } as AngleBoundSpec);
+                }
+            }
+            else if (seed.selType == selectionType.FEATURE)
+            {
+                annotation { "Name" : "Parent features" }
+                seed.features is FeatureList;
+                annotation { "Name" : "Cap faces", "Default" : true }
+                seed.capFaces is boolean;
+                annotation { "Name" : "Non-cap faces", "Default" : true }
+                seed.nonCapFaces is boolean;
+            }
+        }
+
+        annotation { "Name" : "Draft angle" }
+        isAngle(definition.draftAngle, ANGLE_STRICT_90_BOUNDS);
+        annotation { "Name" : "flip angle", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+        definition.flipAngle is boolean;
+
+        annotation { "Name" : "Reapply fillet" }
+        definition.reapplyFillet is boolean;
+
+        annotation { "Name" : "Tangent propagation", "Default" : true }
+        definition.tangentPropagation is boolean;
+
+    }
+    {
+        var angle = definition.draftAngle;
+        var neutralPlane;
+
+        neutralPlane = evPlane(context, {
+                    "face" : definition.neutralPlane
+                });
+        if (definition.flipAngle)
+        {
+            neutralPlane.normal = -neutralPlane.normal;
+        }
+        var runningQuery = qNothing();
+        var selectionQuery = [];
+        var mainCount = size(definition.seeds);
+        var finalQuery;
+        var infoString = "";
+
+        // Start for loop for main array parameter
+        for (var i = 0; i < mainCount; i += 1)
+        {
+            // reset all query variables
+            var faces = qNothing();
+            var matchingFaces = qNothing();
+            var directionFaces = qNothing();
+            var protrusion = qNothing();
+            var pocket = qNothing();
+            var hole = qNothing();
+            var tangentFaces = qNothing();
+            var faceBoundary = qNothing();
+            var faceQuery = qNothing();
+            var bodyEdges = qNothing();
+            var directionEdges = qNothing();
+            var convexEdges = qNothing();
+            var featureFaces = qNothing();
+            var capFaces = qNothing();
+            var nonCapFaces = qNothing();
+            var bounded = qNothing();
+
+            // process user selections
+            var seeds = definition.seeds[i]; /* finds one "Add Selection" instance with all UI selections therein (map). Now "seeds.[anything]" already has "i" included*/
+            var features = seeds.features;
+            var select = seeds.inclType; /*ADD, SUBTRACT, or INTERSECT*/
+            var faceSel = seeds.faceSelection; /* face slection type */
+            var directionTol = seeds.directionTol;
+            var loopFaces = seeds.edgeLoop;
+            var boundedFace = seeds.bounded;
+            var boundingFace = seeds.bounding;
+
+            // Face selection options
+            if (seeds.selType == selectionType.FACE)
+                faces = seeds.faces; /* filter the query for all faces selected in one selection box (query) */
+            {
+                if (faceSel == faceSelection.MATCHING)
+                {
+                    matchingFaces = qMatching(faces);
+                }
+                else if (faceSel == faceSelection.TANGENT)
+                {
+                    tangentFaces = qTangentConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.BOUNDED)
+                {
+                    bounded = qFaceOrEdgeBoundedFaces(qUnion([boundedFace, boundingFace]));
+                }
+                else if (faceSel == faceSelection.PARALLEL || faceSel == faceSelection.PERPINDICULAR)
+                {
+                    var directionTol = seeds.directionTol;
+                    var highAngle = 0 * degree + directionTol;
+                    var lowAngle = 0 * degree - directionTol;
+
+                    if (faceSel == faceSelection.PERPINDICULAR)
+                    {
+                        highAngle = 90 * degree + directionTol;
+                        lowAngle = 90 * degree - directionTol;
+                    }
+
+                    // check each face selection against every ownerBody face
+                    for (var face in evaluateQuery(context, faces))
+                    {
+                        var ownerBody = qOwnerBody(face);
+                        var ownerFaces = evaluateQuery(context, qOwnedByBody(ownerBody, EntityType.FACE));
+                        for (var j = 0; j < size(ownerFaces); j += 1)
+                        {
+                            var ownerFace = ownerFaces[j];
+                            try silent
+                            {
+                                var dir1 = extractDirection(context, face);
+                                var dir2 = extractDirection(context, ownerFaces[j]);
+                                var checkAngle = abs(angleBetween(dir1, dir2));
+                                var negCheckAngle = abs(angleBetween(dir1, -dir2));
+
+                                if (checkAngle <= highAngle && checkAngle >= lowAngle || negCheckAngle <= highAngle && negCheckAngle >= lowAngle)
+                                {
+                                    directionFaces = qUnion([directionFaces, ownerFaces[j]]);
+                                }
+                            }
+                        }
+                    }
+                    // don't include the selected perpindicular reference
+                    if (faceSel == faceSelection.PERPINDICULAR)
+                    {
+                        faces = qNothing();
+                    }
+                }
+                else if (faceSel == faceSelection.PROTRUSION)
+                {
+                    protrusion = qConvexConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.POCKET)
+                {
+                    pocket = qConcaveConnectedFaces(faces);
+                }
+                else if (faceSel == faceSelection.HOLE)
+                {
+                    hole = qHoleFaces(faces);
+                }
+                faceQuery = qUnion([faces, directionFaces, matchingFaces, tangentFaces, pocket, protrusion, hole, bounded]);
+            }
+
+            // Feature seletion operations
+            if (seeds.selType == selectionType.FEATURE)
+            {
+                var featureIds = keys(features);
+                for (var i = 0; i < size(featureIds); i += 1)
+                {
+                    if (seeds.capFaces)
+                    {
+                        capFaces = qUnion([capFaces, qCapEntity(featureIds[i], CapType.END, EntityType.FACE), qCapEntity(featureIds[i], CapType.START, EntityType.FACE)]);
+                    }
+                    if (seeds.nonCapFaces)
+                    {
+                        nonCapFaces = qUnion([nonCapFaces, qNonCapEntity(featureIds[i], EntityType.FACE)]);
+                    }
+                }
+
+                featureFaces = qUnion([capFaces, nonCapFaces]);
+            }
+
+            // add to or subtract from running query
+            selectionQuery = qUnion([featureFaces, faceQuery]);
+
+            if (select == inclusionType.ADD)
+            {
+                runningQuery = qUnion([runningQuery, selectionQuery]);
+            }
+            else if (select == inclusionType.SUBTRACT)
+            {
+                runningQuery = qSubtraction(runningQuery, selectionQuery);
+            }
+            else if (select == inclusionType.INTERSECT)
+            {
+                runningQuery = qIntersection([runningQuery, selectionQuery]);
+            }
+        }
+
+        // Either preview the selection or perform opFillet
+        finalQuery = runningQuery;
+
+        var faceCount = size(evaluateQuery(context, finalQuery));
+        if (faceCount == 1)
+        {
+            infoString = toString(faceCount ~ " face selected.");
+        }
+        else
+        {
+            infoString = toString(faceCount ~ " faces selected.");
+        }
+        if (definition.pause)
+        {
+            // multiple debugs makes it more visible or can mix colors
+            
+            addDebugEntities(context, finalQuery, DebugColor.CYAN);
+            addDebugEntities(context, finalQuery, DebugColor.CYAN);
+
+            reportFeatureWarning(context, id, infoString ~ " Regeneration is paused.");
+
+        }
+        else
+        {
+            reportFeatureInfo(context, id, infoString);
+
+            var direction;
+            if (definition.directionBool)
+            {
+                direction = extractDirection(context, definition.direction);
+            }
+            else
+            {
+                direction = neutralPlane.normal;
+            }
+            opDraft(context, id + "draft1", {
+                        "draftType" : DraftType.REFERENCE_SURFACE,
+                        "draftFaces" : finalQuery,
+                        "referencePlane" : neutralPlane,
+                        "pullVec" : direction,
+                        "angle" : angle,
+                        "reFillet" : definition.reapplyFillet,
+                        "tangentPropagation" : definition.tangentPropagation
+                    });
+        }
+    });
+
+export enum selectionType
+{
+    annotation { "Name" : "Face" }
+    FACE,
+    // annotation { "Name" : "Body" }
+    // BODY,
+    annotation { "Name" : "Feature" }
+    FEATURE
+}
+
+export enum inclusionType
+{
+    annotation { "Name" : "Add" }
+    ADD,
+    annotation { "Name" : "Subtract" }
+    SUBTRACT,
+    annotation { "Name" : "Intersect" }
+    INTERSECT
+}
+
+export enum faceSelection
+{
+    annotation { "Name" : "None" }
+    NONE,
+    annotation { "Name" : "Protrusion" }
+    PROTRUSION,
+    annotation { "Name" : "Pocket" }
+    POCKET,
+    annotation { "Name" : "Hole" }
+    HOLE,
+    annotation { "Name" : "Tangent connected" }
+    TANGENT,
+    annotation { "Name" : "Bounded faces" }
+    BOUNDED,
+    annotation { "Name" : "Matching" }
+    MATCHING,
+    annotation { "Name" : "Parallel" }
+    PARALLEL,
+    annotation { "Name" : "Perpindicular" }
+    PERPINDICULAR
+}
+
+export enum bodySelection
+{
+    annotation { "Name" : "Convexity" }
+    CONVEXITY,
+    annotation { "Name" : "Direction" }
+    DIRECTION,
+    annotation { "Name" : "Edge length" }
+    LENGTH,
+}
