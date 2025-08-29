@@ -1,0 +1,21 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1746;
+import(path : "onshape/std/geometry.fs", version : "1746.0");
+
+icon::import(path : "dbbb95dc4b30445fafe0ff6d", version : "17a1cb30b1bd13b6dd31b29b");
+
+annotation { "Feature Type Name" : "Import 3D File",
+"Icon" : icon::BLOB_DATA}
+export const importFeature = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "3D File" }
+        definition.file is CADImportData;
+    }
+    {
+        opImportForeign(context, id + "importForeign1", {
+                "blobData" : definition.file
+        });
+    });
