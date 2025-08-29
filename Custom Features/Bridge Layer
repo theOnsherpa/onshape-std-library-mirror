@@ -1,0 +1,112 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1483;
+import(path : "onshape/std/geometry.fs", version : "1483.0");
+
+icon::import(path : "0d906d0342fdab585ca6b46e", version : "22b5ded2b3293cf73da6cf77");
+
+
+export enum bridgeLayerOptions
+{
+    Bodies,
+    Faces
+}
+
+
+annotation { "Feature Type Name" : "Bridge layer", "Icon" : icon::BLOB_DATA }
+export const bridgeLayer = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Bridge layer options", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.options is bridgeLayerOptions;
+
+        if (definition.options == bridgeLayerOptions.Bodies)
+        {
+            annotation { "Name" : "Face on build plate", "Filter" : EntityType.FACE && GeometryType.PLANE && ConstructionObject.NO, "MaxNumberOfPicks" : 1 }
+            definition.base is Query;
+
+            annotation { "Name" : "Faces to exclude", "Filter" : EntityType.FACE && GeometryType.PLANE && ConstructionObject.NO }
+            definition.facesToExclude is Query;
+        }
+
+        if (definition.options == bridgeLayerOptions.Faces)
+        {
+            annotation { "Name" : "Faces", "Filter" : EntityType.FACE && GeometryType.PLANE && ConstructionObject.NO }
+            definition.faces is Query;
+        }
+
+        annotation { "Name" : "Layer height", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE }
+        isLength(definition.layerThickness, { (millimeter) : [0, .2, 1000000] } as LengthBoundSpec);
+
+
+    }
+    {
+        // the faces to sketch on
+        var bridgeFaces;
+        
+        var zDirection = extractDirection(context, definition.base);
+        
+        var facesToExclude = qUnion([definition.base, definition.facesToExclude]);
+
+        if (definition.options == bridgeLayerOptions.Bodies)
+        {
+            var body = qOwnerBody(definition.base);
+            var bodyFaces = qSubtraction(qOwnedByBody(body, EntityType.FACE), facesToExclude);
+            var planarBodyFaces = [];
+            var faceNormal;
+            for (var face in evaluateQuery(context, bodyFaces))
+            {
+                try silent
+                {
+                    // finds the normal, but if it's not planar, it'll fail and move on. Two birds!
+                    faceNormal = evPlane(context, {
+                                    "face" : face
+                                }).normal;
+                    planarBodyFaces = append(planarBodyFaces, face);
+                }
+            }
+            planarBodyFaces = qUnion(planarBodyFaces);
+
+            // filters planar faces for ones whose normals point in the printer Z direction
+            bridgeFaces = qParallelPlanes(planarBodyFaces, zDirection, false);
+
+        }
+
+        if (definition.options == bridgeLayerOptions.Faces)
+        {
+            bridgeFaces = definition.faces;
+        }
+
+        forEachEntity(context, id + "createBridgeLayer", bridgeFaces, function(face is Query, id is Id)
+            {
+                var theSketch = newSketch(context, id + "sketch1", {
+                        "sketchPlane" : face
+                    });
+                skSolve(theSketch);
+                
+                var sketchFaces = qCreatedBy(id + "sketch1", EntityType.FACE);
+
+                // only use sketches that produce multiple faces
+                if (size(evaluateQuery(context, sketchFaces)) > 1)
+                {
+                    opExtrude(context, id + "extrude1", {
+                                "entities" : sketchFaces,
+                                "direction" : -evPlane(context, {
+                                                    "face" : face
+                                                }).normal,
+                                "endBound" : BoundingType.BLIND,
+                                "endDepth" : definition.layerThickness
+                            });
+
+                    opBoolean(context, id + "boolean1", {
+                                "tools" : qUnion([qOwnerBody(face), qCreatedBy(id + "extrude1", EntityType.BODY)]),
+                                "operationType" : BooleanOperationType.UNION
+                            });
+                }
+
+                opDeleteBodies(context, id + "deleteBodies1", {
+                            "entities" : qCreatedBy(id + "sketch1")
+                        });
+            });
+    });
