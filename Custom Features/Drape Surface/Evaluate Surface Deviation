@@ -1,0 +1,179 @@
+FeatureScript 2656;
+import(path : "onshape/std/common.fs", version : "2656.0");
+import(path : "58ee565b9814988ff13504d8", version : "9aa6b9c06d64149c151dac58");
+import(path : "9f4c9835d8018ff7dbdb5683/77c856824c783f8f1c5a3312/c6e1bb9b94eaf2001e2b9467", version : "c44d38ea0a1ed9bfab6051af");
+export import(path : "12312312345abcabcabcdeff/bb942b44ff8a8e615f389324/0e71899789a4f9231b17a016", version : "1ea318d9f8e833fc6ca3cc21");
+icon::import(path : "01843188adc1243facb79d76", version : "a95a5706610d72ab89546f1f");
+
+
+annotation { "Feature Type Name" : "Surface deviation",
+        "Feature Type Description" : "",
+        "Icon" : icon::BLOB_DATA,
+        "Feature Name Template" : "Deviation = #maxDeviation",
+        "UIHint" : UIHint.NO_PREVIEW_PROVIDED, }
+
+export const evSurfaceDeviation = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Surface", "Filter" : EntityType.FACE, "MaxNumberOfPicks" : 1 }
+        definition.surface is Query;
+
+        annotation { "Name" : "Topologies", "Filter" : EntityType.BODY && AllowMeshGeometry.YES }
+        definition.topologies is Query;
+
+        annotation { "Name" : "U Count" }
+        isInteger(definition.uCount, UV_BOUNDS);
+
+        annotation { "Name" : "V Count" }
+        isInteger(definition.vCount, UV_BOUNDS);
+
+        annotation { "Name" : "Set limit" }
+        definition.setLimit is boolean;
+
+        if (definition.setLimit)
+        {
+            annotation { "Name" : "Acceptable deviation", "Description" : "Cause the feature to throw a warning if it exceeds a certain value." }
+            isLength(definition.acceptableDeviation, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+        }
+
+        annotation { "Group Name" : "Deviation", "Collapsed By Default" : false }
+        {
+            annotation { "Name" : "Maximum deviation", "UIHint" : UIHint.READ_ONLY }
+            isLength(definition.maxDeviation, NONNEGATIVE_ZERO_DEFAULT_LENGTH_BOUNDS);
+
+            annotation { "Name" : "Show deviation", "Default" : true }
+            definition.showDeviation is boolean;
+            annotation { "Group Name" : "Show deviation", "Collapsed By Default" : false, "Driving Parameter" : "showDeviation" }
+            {
+                if (definition.showDeviation)
+                {
+                    annotation { "Name" : "Deviation type", "Default" : DeviationType.ALL }
+                    definition.deviationType is DeviationType;
+
+                    annotation { "Name" : "Limit" }
+                    isLength(definition.limit, NONNEGATIVE_ZERO_DEFAULT_LENGTH_BOUNDS);
+                }
+            }
+
+        }
+
+        annotation { "Group Name" : "Create variables", "Collapsed By Default" : true }
+        {
+            annotation { "Name" : "#minimumDeviation" }
+            definition.createMinVariable is boolean;
+
+            if (definition.createMinVariable)
+            {
+                annotation { "Name" : "Prepend" }
+                definition.minVariableString is string;
+            }
+
+            annotation { "Name" : "#maximumDeviation" }
+            definition.createMaxVariable is boolean;
+
+            if (definition.createMaxVariable)
+            {
+                annotation { "Name" : "Prepend" }
+                definition.maxVariableString is string;
+            }
+
+            annotation { "Name" : "#averageDeviation" }
+            definition.createAverageVariable is boolean;
+
+            if (definition.createAverageVariable)
+            {
+                annotation { "Name" : "Prepend" }
+                definition.averageVariableString is string;
+            }
+
+        }
+
+    }
+    {
+        const surfacePlanes = createPlanesOnSurface(context, id, {
+                        "tool" : definition.surface,
+                        "isVDirection" : false,
+                        "vCount" : definition.vCount,
+                        "uCount" : definition.uCount,
+                    })->concatenateArrays();
+
+        var surfacePoints = [];
+
+        for (var surfacePlane in surfacePlanes)
+            surfacePoints = append(surfacePoints, surfacePlane.origin);
+
+        const deviations = processDeviation(context, id, definition, surfacePoints, definition.topologies);
+
+        var distances = [];
+        for (var deviation in deviations)
+            distances = append(distances, deviation.deviation);
+
+        createDeviationVariables(context, distances, definition);
+
+        if (definition.setLimit && max(distances) >= definition.acceptableDeviation)
+            reportFeatureWarning(context, id, "The deviation exceeds the acceptable limit.");
+
+    });
+
+
+function createDeviationVariables(context is Context, distances is array, definition is map)
+{
+
+    var variables = {};
+    if (definition.createMinVariable)
+    {
+        const variableName = definition.minVariableString == "" ? "minimumDeviation" : definition.minVariableString ~ "_minimumDeviation";
+        variables[variableName] = min(distances);
+    }
+    if (definition.createMaxVariable)
+    {
+        const variableName = definition.maxVariableString == "" ? "maximumDeviation" : definition.minVariableString ~ "_maximumDeviation";
+        variables[variableName] = max(distances);
+    }
+    if (definition.createAverageVariable)
+    {
+        const variableName = definition.averageVariableString == "" ? "averageDeviation" : definition.minVariableString ~ "_averageDeviation";
+        variables[variableName] = average(distances);
+    }
+
+    for (var key, value in variables)
+    {
+        setVariable(context, key, value);
+    }
+
+}
+
+
+/**
+ * From Constrained Surface in the std library: https://cad.onshape.com/documents/12312312345abcabcabcdeff/v/bb942b44ff8a8e615f389324/e/0e71899789a4f9231b17a016
+ * Modified to return the deviations.
+ */
+function processDeviation(context is Context, id is Id, definition is map, points is array, surface is Query) returns array
+{
+    const allDeviations = definition.showDeviation && definition.deviationType == DeviationType.ALL;
+    const deviations = evPointsDeviation(context, {
+                "points" : points,
+                "topologies" : surface,
+                "showDeviation" : definition.showDeviation,
+                "allDeviations" : allDeviations,
+                "limit" : definition.limit
+            });
+
+    var maxDeviation = 0 * meter;
+    if (allDeviations)
+    {
+        maxDeviation = max(mapArray(deviations, function(deviation)
+                {
+                    return deviation.deviation;
+                }));
+    }
+    else
+    {
+        maxDeviation = deviations[0].deviation;
+    }
+
+    setFeatureComputedParameter(context, id, { "name" : "maxDeviation", "value" : maxDeviation });
+
+    return deviations;
+}
+
