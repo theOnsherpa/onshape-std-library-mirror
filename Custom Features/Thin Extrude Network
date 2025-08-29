@@ -1,0 +1,94 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2522;
+import(path : "onshape/std/common.fs", version : "2522.0");
+import(path : "12312312345abcabcabcdeff/99c36f7e6fdff1b4febc9ef6/aff9bec3150a48098a8184ac", version : "f75089cff6d203264e3cffea");
+import(path : "9f4c9835d8018ff7dbdb5683/c7e6c3cab654dc85a951c1a4/c6e1bb9b94eaf2001e2b9467", version : "ffb410215c2bf8fab0226c10");
+
+
+annotation { "Feature Type Name" : "Thin extrude network", "Feature Type Description" : "" }
+export const thinExtrudeNetwork = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Sketch edges to extrude", "Filter" : EntityType.EDGE && SketchObject.YES }
+        definition.edges is Query;
+
+        annotation { "Name" : "My Length" }
+        isLength(definition.depth, LENGTH_BOUNDS);
+
+        annotation { "Name" : "Flip", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+        definition.flip is boolean;
+
+        annotation { "Name" : "Thickness" }
+        isLength(definition.thickness, { (millimeter) : [1e-6, /* min (inclusive) */
+                            5.0, /* default */
+                            10000 /* max (inclusive) */] } as LengthBoundSpec);
+
+
+    }
+    {
+        var direction = !definition.flip ? evOwnerSketchPlane(context, { "entity" : definition.edges }).normal : -(evOwnerSketchPlane(context, { "entity" : definition.edges }).normal);
+
+        var edges = definition.edges;
+
+        forEachEntity(context, id + "extrudeEdge", edges, function(edge is Query, id is Id)
+            {
+                extrude(context, id + "extrude1", {
+                            "bodyType" : ExtendedToolBodyType.THIN,
+                            "entities" : edge,
+                            "endBound" : BoundingType.BLIND,
+                            "depth" : !definition.flip ? definition.depth : -definition.depth,
+                            "wallShape" : edge,
+                            "thickness1" : definition.thickness / 2,
+                            "thickness2" : definition.thickness / 2,
+                        });
+            });
+            
+        // cylinders at end points
+                var endPointQueries = qAdjacent(definition.edges, AdjacencyType.VERTEX, EntityType.VERTEX);
+        endPointQueries = evaluateQuery(context, endPointQueries);
+
+        var endPoints = [];
+        for (var point in endPointQueries)
+        {
+            endPoints = append(endPoints, evVertexPoint(context, { "vertex" : point }));
+        }
+
+        endPoints = deduplicatePoints(endPoints);
+        
+        for (var i = 0; i < size(endPoints); i += 1)
+        {
+            fCylinder(context, id + "cylinder1" + i, {
+                    "topCenter" : endPoints[i],
+                    "bottomCenter" : endPoints[i] + (direction * definition.depth),
+                    "radius" : definition.thickness/2
+            });
+        }
+        
+        opBoolean(context, id + "boolean1", {
+                "tools" : qCreatedBy(id, EntityType.BODY),
+                "operationType" : BooleanOperationType.UNION
+        });
+    });
+
+// /**
+//  * Takes an array of points and returns it without duplicate points
+//  */
+// export function deduplicatePoints(points is array) returns array
+// {
+//     for (var point in points)
+//     {
+//         if (size(point) == 2)
+//         {
+//             point = append(point, 0*meter);
+//         }
+//     }
+
+//     const pointClusters = clusterPoints(points, TOLERANCE.zeroLength * meter);
+
+//     var result = [];
+//     for (var pointCluster in pointClusters)
+//         result = append(result, points[pointCluster[0]]);
+//     return result;
+// }
