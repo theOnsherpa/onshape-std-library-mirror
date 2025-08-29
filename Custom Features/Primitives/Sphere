@@ -1,0 +1,73 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1576;
+import(path : "onshape/std/geometry.fs", version : "1576.0");
+export import(path : "onshape/std/boolean.fs", version : "1576.0");
+export import(path : "b82bd38a9390b4dd3155b161", version : "25f259d811ce5137fa6d74ba");
+icon::import(path : "cffdb10e15b6d0d80b004529", version : "c751bbd496301a6d6acb8bd4");
+
+
+annotation { "Feature Type Name" : "Sphere",
+        "Editing Logic Function" : "sixDirectionalPrimitiveEditingLogic",
+        "Manipulator Change Function" : "manipulatorChange",
+        "Icon" : icon::BLOB_DATA }
+export const ellipsoid = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        sixSidedPredicate(definition);
+    }
+    {
+        // setting up to handle feature patterns
+        const remainingTransform = getRemainderPatternTransform(context, { "references" : definition.locations });
+
+        // making the manipulators
+        createSixSidedManips(definition, context, id);
+
+        //show a coordinate system if needed
+        if (!definition.uniform && definition.showCoord)
+        {
+            displayCsys(context, definition);
+        }
+
+        var values = sixSidedSizes(definition);
+
+        var ellipsoidValues = {
+            "center" : vector(values.Xpos + values.Xneg, values.Ypos + values.Yneg, values.Zpos + values.Zneg) / 2,
+            "radius" : vector(values.Xpos - values.Xneg, values.Ypos - values.Yneg, values.Zpos - values.Zneg) / 2
+        };
+
+        // if empty query make the  on the origin. try silent is used because the query for the studio origin fails when feature patterning this feature.
+        try silent
+        {
+            if (isOriginSelected(context, definition.locations))
+            {
+                definition.locations = definition.locations->qSubtraction(qCreatedBy(makeId("Origin")));
+                fEllipsoid(context, id, ellipsoidValues);
+            }
+        }
+
+        forEachEntity(context, id + "operation", definition.locations, function(vertex is Query, id is Id)
+            {
+                var point = evVertexPoint(context, { "vertex" : vertex });
+
+                fEllipsoid(context, id + "ellipsoid", ellipsoidValues);
+
+                var transforms = getTransform(context, vertex);
+
+                var body = qCreatedBy(id + "ellipsoid", EntityType.BODY);
+
+                opTransform(context, id + "transform", {
+                            "bodies" : body,
+                            "transform" : transforms
+                        });
+
+            });
+
+        transformResultIfNecessary(context, id, remainingTransform);
+
+        processNewBodyIfNeeded(context, id, definition, function()
+            {
+            });
+
+    });
