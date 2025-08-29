@@ -1,0 +1,132 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1364;
+import(path : "onshape/std/geometry.fs", version : "1364.0");
+export import(path : "onshape/std/query.fs", version : "1364.0");
+export import(path : "onshape/std/tool.fs", version : "1364.0");
+export import(path : "onshape/std/patternUtils.fs", version : "1364.0");
+
+// Big thanks to @mbartlett for help in re-thinking and re-writing major areas of this code to make it more usable and work with surfaces.
+
+// Imports used internally
+import(path : "onshape/std/boolean.fs", version : "1364.0");
+import(path : "onshape/std/booleanHeuristics.fs", version : "1364.0");
+import(path : "onshape/std/containers.fs", version : "1364.0");
+import(path : "onshape/std/coordSystem.fs", version : "1364.0");
+import(path : "onshape/std/evaluate.fs", version : "1364.0");
+import(path : "onshape/std/feature.fs", version : "1364.0");
+import(path : "onshape/std/surfaceGeometry.fs", version : "1364.0");
+import(path : "onshape/std/transform.fs", version : "1364.0");
+
+icon::import(path : "b35a283f23917dc6f4c2d951", version : "1fefb609549f2bed84ccbf1b");
+import(path : "a4b329e5322cb74fc525f826/b88a0c6df8be15494f68a6c1/26fb0fe2ab55b885fa38c4f3", version : "41442e69f408b9dab2931640");
+
+
+annotation { "Feature Type Name" : "Multi Mirror", "Icon" : icon::BLOB_DATA }
+export const multiMirror = defineFeature(function(context is Context, topId is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Bodies to mirror", "Filter" : EntityType.BODY && (BodyType.SOLID || BodyType.SHEET), }
+        definition.bodies is Query;
+
+        annotation { "Name" : "Use mate connector", "Default" : false }
+        definition.mateCSys is boolean;
+
+        if (definition.mateCSys)
+            annotation { "Name" : "Mate connector", "Filter" : BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+            definition.mate is Query;
+
+        annotation { "Name" : "X", "Default" : true }
+        definition.x is boolean;
+
+        annotation { "Name" : "Y", "Default" : true }
+        definition.y is boolean;
+
+        annotation { "Name" : "Z", "Default" : true }
+        definition.z is boolean;
+
+        
+    }
+    {
+        var bodies = verifyNonemptyQuery(context, definition, "bodies", ErrorStringEnum.MIRROR_SELECT_PARTS);
+
+        if (definition.mateCSys)
+            verifyNonemptyQuery(context, definition, "mate", ErrorStringEnum.CANNOT_RESOLVE_ENTITIES);
+
+        var cSys;
+        if (definition.mateCSys)
+        {
+            cSys = evMateConnector(context, {
+                        "mateConnector" : definition.mate
+                    });
+        }
+        else
+        {
+            cSys = WORLD_COORD_SYSTEM;
+        }
+
+        var x = definition.x;
+        var y = definition.y;
+        var z = definition.z;
+        var dir = [x, y, z];
+
+        var xTransform = x ? mirrorAcross(plane(cSys.origin, cSys.xAxis)) : identityTransform();
+        var yTransform = y ? mirrorAcross(plane(cSys.origin, yAxis(cSys))) : identityTransform();
+        var zTransform = z ? mirrorAcross(plane(cSys.origin, cSys.zAxis)) : identityTransform();
+        var transforms = [xTransform, yTransform, zTransform];
+
+        if (!x && !y && !z)
+            throw regenError("There must be at least one direction to pattern in.", ["x", "y", "z"]);
+
+        // loop through all selected bodies
+        for (var i = 0; i < size(bodies); i += 1)
+        {
+            var loopBody = bodies[i];
+
+            const bodyId is Id = topId + unstableIdComponent(i);
+            setExternalDisambiguation(context, bodyId, loopBody);
+
+            // loop through each mirror and boolean for the body
+            for (var j = 0; j < 3; j += 1)
+            {
+                if (dir[j] == false)
+                {
+                    continue;
+                }
+                var mirror = transforms[j];
+
+                const id = bodyId + unstableIdComponent(j);
+                // setExternalDisambiguation(context, id, loopBody);
+                opPattern(context, id + "pattern", {
+                            "entities" : loopBody,
+                            "transforms" : [mirror],
+                            "instanceNames" : [toString(dir[j])]
+                        });
+                var tools = qUnion([loopBody, qCreatedBy(id + "pattern", EntityType.BODY)]);
+                const isSheet = evaluateQuery(context, qBodyType(loopBody, BodyType.SHEET)) != [];
+
+                if (isSheet)
+                {
+                    try silent
+                    {
+                        opBoolean(context, id + "boolean", {
+                                    "tools" : tools,
+                                    "operationType" : BooleanOperationType.UNION,
+                                    "makeSolid" : true,
+                                    "detectAdjacencyForSheets" : true,
+                                    "recomputeMatches" : true
+                                });
+                    }
+                }
+                else
+                {
+                    opBoolean(context, id + "boolean", {
+                                "tools" : tools,
+                                "operationType" : BooleanOperationType.UNION
+                            });
+                }
+                loopBody = tools;
+            }
+        }
+    });
