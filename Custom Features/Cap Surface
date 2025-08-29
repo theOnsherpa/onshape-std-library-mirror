@@ -1,0 +1,66 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 1560;
+export import(path : "onshape/std/geometry.fs", version : "1560.0");
+import(path : "12312312345abcabcabcdeff/4fb8229bbd49a1b82a27fe48/4eea9f271b60454e84089e38", version : "134e99dc4bd76c7b546ed721");
+
+
+
+annotation { "Feature Type Name" : "Cap surface" }
+export const capOvyl = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Surface bodies to cap", "Filter" : EntityType.BODY && BodyType.SHEET }
+        definition.bodiesToCap is Query;
+        
+        annotation { "Name" : "Continuity type" }
+        definition.continuity is GeometricContinuity;
+
+    }
+    {
+        forEachEntity(context, id + "findEdges", definition.bodiesToCap, function(body is Query, id is Id)
+            {
+                var edges = qOwnedByBody(body, EntityType.EDGE)->qEdgeTopologyFilter(EdgeTopology.LAMINAR);
+
+                var remainingTransform = getRemainderPatternTransform(context,
+                {
+                        "references" : edges
+                    });
+
+                opExtractWires(context, id + "opExtractWires", {"edges" : edges});
+
+                transformResultIfNecessary(context, id, remainingTransform);
+                
+                var paths = qCreatedBy(id + "opExtractWires", EntityType.BODY);
+                
+                forEachEntity(context, id + "makeCaps", paths, function(path is Query, id is Id)
+                {
+                    var pathCurves = qLaminarDependency(qOwnedByBody(path, EntityType.EDGE));
+                    // var edges = 
+                    
+                    var G0 = definition.continuity == GeometricContinuity.G0 ? pathCurves : qNothing();
+                    var G1 = definition.continuity == GeometricContinuity.G1 ? pathCurves : qNothing();
+                    var G2 = definition.continuity == GeometricContinuity.G2 ? pathCurves : qNothing();
+                    
+                    opFillSurface(context, id + "opFillSurface1", {
+                            "edgesG0" : G0,
+                            "edgesG1" : G1,
+                            "edgesG2" : G2,
+                    });
+                });
+                
+                var filledFaces = qCreatedBy(id + "makeCaps", EntityType.BODY);
+                var tools = qUnion([body, filledFaces]);
+                
+                opBoolean(context, id + "boolean1", {
+                        "tools" : tools,
+                        "operationType" : BooleanOperationType.UNION,
+                        "makeSolid" : true
+                });
+                
+                opDeleteBodies(context, id + "deleteBodies1", {
+                        "entities" : paths
+                });
+            });
+    });
