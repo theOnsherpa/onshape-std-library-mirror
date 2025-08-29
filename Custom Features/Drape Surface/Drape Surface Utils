@@ -1,0 +1,113 @@
+
+// This custom feature is owned by Evan Reese and distributed by The Onsherpa. It may not be redistributed without permission of the owner. Copywright © 2025 Evan Reese.
+
+FeatureScript 2581;
+import(path : "onshape/std/common.fs", version : "2581.0");
+
+/**
+ * A predicate to add curve approximation parameters to a feature.
+ */
+export predicate curveApproximationPredicateModified(definition is map)
+{
+    annotation { "Group Name" : "Approximation parameters", "Collapsed By Default" : false }
+    {
+        annotation { "Name" : "Target degree", "Column Name" : "Approximation target degree" }
+        isInteger(definition.approximationDegree, DEGREE_BOUND);
+
+        annotation { "Name" : "Try for single span" }
+        definition.singleSpan is boolean;
+
+        if (!definition.singleSpan)
+        {
+            annotation { "Name" : "Maximum control points" }
+            isInteger(definition.approximationMaxCPs, { (unitless) : [4, 15, MAX_CONTROL_POINTS] } as IntegerBoundSpec);
+        }
+
+        annotation { "Name" : "Tolerance" }
+        isLength(definition.approximationTolerance, TOLERANCE_BOUND);
+
+        annotation { "Name" : "Keep start derivative", "UIHint" : UIHint.ALWAYS_HIDDEN, "Default" : false }
+        definition.keepStartDerivative is boolean;
+
+        annotation { "Name" : "Keep end derivative", "UIHint" : UIHint.ALWAYS_HIDDEN, "Default" : false }
+        definition.keepEndDerivative is boolean;
+
+        annotation { "Name" : "Show deviation" }
+        definition.approximationShowDeviation is boolean;
+        annotation { "Group Name" : "Show deviation", "Driving Parameter" : "approximationShowDeviation", "Collapsed By Default" : false }
+        {
+            if (definition.approximationShowDeviation)
+            {
+                annotation { "Name" : "Maximum deviation", "UIHint" : UIHint.READ_ONLY }
+                isLength(definition.maxDeviation, NONNEGATIVE_ZERO_DEFAULT_LENGTH_BOUNDS);
+            }
+        }
+    }
+}
+
+export function approximateResultsModified(context is Context, id is Id, definition is map, showCurves is boolean)
+{
+    const curves = evaluateQuery(context, qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.WIRE));
+    const numCurves = size(curves);
+    if (numCurves == 0)
+    {
+        return;
+    }
+    var maxOfMaxDeviations = 0;
+    for (var i = 0; i < numCurves; i += 1)
+    {
+        const bspline = approximateOneCurve(context, curves[i], definition);
+
+        const baseId = id + "approximate2" + i;
+        opCreateBSplineCurve(context, baseId + "bSplineCurve", {
+                    "bSplineCurve" : bspline
+                });
+        if (definition.approximationShowDeviation)
+        {
+            const maxDeviationResult = evMaxPathDeviation(context, {
+                        "side1" : qCreatedBy(baseId + "bSplineCurve", EntityType.EDGE),
+                        "side2" : curves[i],
+                        "showDeviation" : false });
+            if (maxOfMaxDeviations < maxDeviationResult.deviation)
+            {
+                maxOfMaxDeviations = maxDeviationResult.deviation;
+            }
+        }
+        opEditCurve(context, baseId + "editCurve", {
+                    "wire" : curves[i],
+                    "edge" : qCreatedBy(baseId + "bSplineCurve", EntityType.EDGE),
+                    "showCurves" : showCurves
+                });
+        opDeleteBodies(context, baseId + "deleteBSplineCurve", {
+                    "entities" : qCreatedBy(baseId + "bSplineCurve", EntityType.BODY)
+                });
+    }
+
+    setFeatureComputedParameter(context, id, { "name" : "maxDeviation", "value" : maxOfMaxDeviations });
+}
+
+function approximateOneCurve(context is Context, curve is Query, definition is map) returns BSplineCurve
+{
+    var path;
+    try silent
+    {
+        path = constructPath(context, qOwnedByBody(curve, EntityType.EDGE), { "tolerance" : 1e-5 * meter }).path;
+    }
+    catch (error)
+    {
+        throw regenError(error, curve);
+    }
+    checkApproximationParameters(definition, path);
+    const approximationTarget = makeApproximationTarget(context, path, false, false);
+    const approximationMaxCPs = definition.singleSpan ? definition.approximationDegree + 1 : definition.approximationMaxCPs;
+    return approximateSpline(context, {
+                    "degree" : definition.approximationDegree,
+                    "tolerance" : definition.approximationTolerance,
+                    "isPeriodic" : path.closed,
+                    "targets" : [approximationTarget],
+                    "maxControlPoints" : approximationMaxCPs
+                })[0];
+}
+
+export const UV_BOUNDS = { (unitless) : [0, 10, 10000] } as IntegerBoundSpec;
+
