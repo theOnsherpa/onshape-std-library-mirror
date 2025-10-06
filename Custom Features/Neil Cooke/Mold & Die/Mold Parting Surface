@@ -1,0 +1,1150 @@
+FeatureScript 2045;
+import(path : "onshape/std/common.fs", version : "2045.0");
+import(path : "onshape/std/extendendtype.gen.fs", version : "2045.0");
+icon::import(path : "7ca4c04e5a795c56e59e65d0", version : "d54acdf1297c3a5ff00cb78c");
+
+annotation { "Feature Type Name" : "Mold parting surface", "Editing Logic Function" : "editValues", "Icon" : icon::BLOB_DATA, "Feature Type Description" : "Extends the Shut-off surface to the boundary of the Stock."  }
+export const partingSurface = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Stock part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.stock is Query;
+
+        annotation { "Name" : "Shut-off surfaces", "Filter" : EntityType.BODY && BodyType.SHEET }
+        definition.shutoff is Query;
+
+        annotation { "Name" : "Ejection direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+        definition.direction is Query;
+
+        annotation { "Name" : "Default type", "UIHint" : "SHOW_LABEL" }
+        definition.extendType is EXTEND_TYPE;
+
+        if (definition.extendType == EXTEND_TYPE.OFFSET)
+        {
+            annotation { "Name" : "Smooth offset", "Default" : false }
+            definition.smooth is boolean;
+
+            if (definition.smooth)
+            {
+                annotation { "Name" : "Sample length" }
+                isLength(definition.smoothFactor, NONNEGATIVE_LENGTH_BOUNDS);
+            }
+        }
+
+        annotation { "Name" : "Edges to modify", "Item name" : "Edges", "Driven query" : "entity", "Item label template" : "#entity" }
+        definition.changeEdges is array;
+
+        for (var edge in definition.changeEdges)
+        {
+            annotation { "Name" : "Edges", "Filter" : EntityType.EDGE && EdgeTopology.ONE_SIDED && SketchObject.NO }
+            edge.entity is Query;
+
+            annotation { "Name" : "Edge type" }
+            edge.edgeExtendType is EDGE_EXTEND_TYPE;
+        }
+
+        annotation { "Name" : "Interlock" }
+        definition.interlock is boolean;
+
+        if (definition.interlock)
+        {
+            annotation { "Name" : "Offset by", "UIHint" : "SHOW_LABEL", "Default" : INTERLOCK_TYPE.SKETCH }
+            definition.interlockType is INTERLOCK_TYPE;
+
+            if (definition.interlockType == INTERLOCK_TYPE.SKETCH)
+            {
+                annotation { "Name" : "Sketch regions for offset", "Filter" : SketchObject.YES && EntityType.FACE && ConstructionObject.NO }
+                definition.sketchOffset is Query;
+            }
+            else
+            {
+                annotation { "Name" : "Minimum offset" }
+                isLength(definition.offset, INTERLOCK);
+            }
+
+            annotation { "Name" : "Height by", "UIHint" : "SHOW_LABEL" }
+            definition.interlockHeight is INTERLOCK_PLANE;
+
+            if (definition.interlockHeight == INTERLOCK_PLANE.OFFSET)
+            {
+                annotation { "Name" : "Minimum height" }
+                isLength(definition.height, INTERLOCK);
+            }
+            else
+            {
+                annotation { "Name" : "Parting plane", "Filter" : EntityType.FACE && GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
+                definition.interlockPlane is Query;
+            }
+
+            annotation { "Name" : "Draft angle" }
+            isAngle(definition.draftAngle, DRAFT_ANGLE);
+
+            annotation { "Name" : "Draft direction", "UIHint" : "OPPOSITE_DIRECTION", "Default" : true }
+            definition.draftDirection is boolean;
+        }
+    }
+    {
+        if (evaluateQuery(context, definition.shutoff) == [])
+        {
+            throw regenError("Shut-off surface is not valid", ["shutoff"]);
+        }
+
+        knitShutOffs(context, id, definition);
+
+        definition.plane = evPlane(context, { "face" : definition.direction });
+        definition.cSys = coordSystem(definition.plane);
+        definition.stockBox = evBox3d(context, { "topology" : definition.stock, "cSys" : definition.cSys, "tight" : true });
+        definition.stockCenter = toWorld(definition.cSys, box3dCenter(definition.stockBox));
+        definition.stockSize = evDistance(context, { "side0" : definition.stockBox.maxCorner, "side1" : definition.stockBox.minCorner }).distance / 2;
+        definition.stockHeight = definition.stockBox.maxCorner[2] - definition.stockBox.minCorner[2];
+        definition.stockTopFace = qParallelPlanes(qOwnedByBody(definition.stock, EntityType.FACE), definition.plane.normal, false);
+        definition.stockBottomFace = qParallelPlanes(qOwnedByBody(definition.stock, EntityType.FACE), -definition.plane.normal, false);
+        definition.stockWalls = qAttributeQuery({ "name" : "moldStockSides" });
+        definition.outlinePlane = evPlane(context, { "face" : definition.stockBottomFace });
+        definition.outlinePlane.normal = definition.plane.normal;
+        definition.outline = createOutline(context, id, definition);
+        definition.allLoops = qLoopEdges(qOwnedByBody(definition.shutoff, EntityType.FACE));
+        definition.outerLoop = getOuterLoop(context, definition);
+        definition.error = new box({ "status" : 0, "error" : "", "entities" : qNothing() });
+
+        var changedEdges = processChangedEdges(context, id, definition);
+
+        definition.selectedEdges = changedEdges.selected;
+
+        if (evaluateQuery(context, changedEdges.remainder) != [])
+        {
+            extend(context, id, definition, changedEdges.remainder, definition.extendType);
+        }
+
+        if (evaluateQuery(context, changedEdges.extend) != [])
+        {
+            extend(context, id + "extend", definition, changedEdges.extend, EDGE_EXTEND_TYPE.EXTEND);
+        }
+
+        if (evaluateQuery(context, changedEdges.extrude) != [])
+        {
+            extend(context, id + "extrude", definition, changedEdges.extrude, EDGE_EXTEND_TYPE.EXTRUDE);
+        }
+
+        if (evaluateQuery(context, changedEdges.flip) != [])
+        {
+            extend(context, id + "flip", definition, changedEdges.flip, EDGE_EXTEND_TYPE.FLIP);
+        }
+
+        if (definition.interlock)
+        {
+            interlock(context, id, definition);
+        }
+        else // clean up
+        {
+            try silent
+            {
+                opDeleteBodies(context, id + "deleteOutlineBody", { "entities" : qCreatedBy(id + "outlineBody") });
+            }
+        }
+
+        // trim to stock
+        trimFaces(context, id, qUnion([qOwnedByBody(definition.shutoff, EntityType.FACE), qCreatedBy(id, EntityType.FACE)]), definition.stock, true);
+
+        try silent // Only applies if boolean operation failed and a separate parting surface is created
+        {
+            setProperty(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "propertyType" : PropertyType.NAME,
+                        "value" : "Mold Parting Surface" });
+
+            setProperty(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "propertyType" : PropertyType.APPEARANCE,
+                        "value" : color(0.9, 0.9, 0.0, 1.0) });
+
+            setAttribute(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "attribute" : { "name" : "moldPartingSurface" } });
+        }
+
+        if (definition.error[].status == 1 && evaluateQuery(context, definition.error[].entities) != [])
+        {
+            addDebugEntities(context, definition.error[].entities);
+            reportFeatureInfo(context, id, definition.error[].error);
+        }
+        if (definition.error[].status == 2)
+        {
+            reportFeatureInfo(context, id, definition.error[].error);
+        }
+    });
+
+function interlock(context is Context, id is Id, definition is map)
+{
+    var interlockId = id + "extrudeInterlockOffset";
+
+    if (definition.interlockType == INTERLOCK_TYPE.SKETCH)
+    {
+        opDeleteBodies(context, id + "unusedOutlineBody", {
+                    "entities" : qCreatedBy(id + "outlineBody") });
+
+        if (evaluateQuery(context, definition.sketchOffset) == [])
+        {
+            return;
+        }
+
+        opExtrude(context, interlockId, {
+                    "entities" : definition.sketchOffset,
+                    "direction" : definition.plane.normal,
+                    "startBound" : BoundingType.THROUGH_ALL,
+                    "endBound" : BoundingType.THROUGH_ALL });
+
+        opReplaceFace(context, id + "replaceTop", {
+                    "replaceFaces" : qCapEntity(interlockId, CapType.END, EntityType.FACE),
+                    "templateFace" : definition.stockTopFace });
+
+        opReplaceFace(context, id + "replaceBottom", {
+                    "replaceFaces" : qCapEntity(interlockId, CapType.START, EntityType.FACE),
+                    "templateFace" : definition.stockBottomFace });
+    }
+    else
+    {
+        try silent
+        {
+            opOffsetFace(context, interlockId, {
+                        "moveFaces" : qNonCapEntity(id + "outlineBody", EntityType.FACE),
+                        "offsetDistance" : definition.offset + 0.1 * millimeter });
+
+            interlockId = id + "outlineBody";
+        }
+        catch
+        {
+            throw regenError("Part geometry too complex to offset. Try using a sketched offset.", ["offset", "sketchOffset"]);
+        }
+    }
+
+    var bodyTool = qCreatedBy(interlockId, EntityType.BODY);
+
+    // extract faces for depth calculation only, then discard
+    try silent
+    {
+        opExtractSurface(context, id + "interlockSideFaces", { "faces" : qNonCapEntity(interlockId, EntityType.FACE), "offset" : 0 * meter });
+
+        opSplitFace(context, id + "splitInterlockFaces", {
+                    "faceTargets" : qCreatedBy(id + "interlockSideFaces", EntityType.FACE),
+                    "bodyTools" : definition.shutoff });
+    }
+    catch
+    {
+        throw regenError("Unable to merge interlock surface. Check parting surface is complete.");
+    }
+
+    // find depth first
+    var minDistance = evDistance(context, {
+            "side0" : qCreatedBy(id + "splitInterlockFaces", EntityType.EDGE),
+            "side1" : definition.stockBottomFace });
+
+    opDeleteBodies(context, id + "deleteInterlockSideFaces", { "entities" : qCreatedBy(id + "interlockSideFaces", EntityType.BODY) });
+
+    var partingPlane = definition.plane;
+    partingPlane.origin[2] = minDistance.sides[0].point[2] - definition.height;
+
+    if (evaluateQuery(context, definition.interlockPlane) != [])
+    {
+        if (parallelVectors(evPlane(context, { "face" : definition.interlockPlane }).normal, definition.plane.normal))
+        {
+            partingPlane = evPlane(context, { "face" : definition.interlockPlane });
+            partingPlane.normal = definition.plane.normal;
+        }
+        else
+        {
+            throw regenError("Interlock plane is not normal to ejection direction.", ["interlockPlane"]);
+        }
+    }
+
+    var topDistance = evDistance(context, {
+                "side0" : partingPlane,
+                "side1" : definition.stockTopFace }).distance;
+
+    opExtractSurface(context, id + "partingPlane", { "faces" : definition.stockTopFace, "offset" : -topDistance });
+
+    if (definition.draftDirection)
+    {
+        opDraft(context, id + "neutralDraftInterlock", {
+                    "draftType" : DraftType.NEUTRAL_PLANE,
+                    "neutralPlane" : qCreatedBy(id + "partingPlane", EntityType.FACE),
+                    "draftFaces" : nonCoincidentFaces(context, definition, qNonCapEntity(interlockId, EntityType.FACE)),
+                    "pullVec" : definition.plane.normal,
+                    "angle" : definition.draftAngle });
+    }
+
+    opSplitFace(context, id + "splitInterlockSideFaces", {
+                "faceTargets" : qNonCapEntity(interlockId, EntityType.FACE),
+                "bodyTools" : definition.shutoff });
+
+    if (!definition.draftDirection)
+    {
+        var draftFaces = qFarthestAlong(nonCoincidentFaces(context, definition, qNonCapEntity(interlockId, EntityType.FACE)), -definition.plane.normal);
+
+        var faceMap = [];
+
+        for (var face in evaluateQuery(context, draftFaces))
+        {
+            faceMap = append(faceMap, { "face" : face,
+                        "references" : qIntersection([qCreatedBy(id + "splitInterlockSideFaces", EntityType.EDGE),
+                                    qAdjacent(face, AdjacencyType.EDGE, EntityType.EDGE)]) });
+        }
+
+        try silent
+        {
+            opDraft(context, id + "referenceDraftInterlock", {
+                        "draftType" : DraftType.REFERENCE_ENTITY,
+                        "neutralPlane" : qCreatedBy(id + "partingPlane", EntityType.FACE),
+                        "draftFaces" : draftFaces,
+                        "pullVec" : definition.plane.normal,
+                        "angle" : definition.draftAngle,
+                        "referenceEntityDraftOptions" : faceMap });
+        }
+        catch
+        {
+            throw regenError("Interlock cannot be drafted. Try a different angle or offset.", ["draftAngle"]);
+        }
+    }
+
+    opSplitFace(context, id + "splitInterlockAtPlane", {
+                "faceTargets" : nonCoincidentFaces(context, definition, qNonCapEntity(interlockId, EntityType.FACE)),
+                "bodyTools" : qCreatedBy(id + "partingPlane", EntityType.BODY) });
+
+    trimFaces(context, id + "trimShutoff", qOwnedByBody(definition.shutoff, EntityType.FACE), bodyTool, true);
+    trimFaces(context, id + "trimPartingPlane", qCreatedBy(id + "partingPlane", EntityType.FACE), bodyTool, false);
+
+    opDeleteFace(context, id + "deleteTopFaces", {
+                "deleteFaces" : qFarthestAlong(qCreatedBy(interlockId, EntityType.FACE), definition.plane.normal),
+                "includeFillet" : false,
+                "capVoid" : false,
+                "leaveOpen" : true });
+
+    opDeleteFace(context, id + "deleteBottomFaces", {
+                "deleteFaces" : qFarthestAlong(qCreatedBy(interlockId, EntityType.FACE), -definition.plane.normal),
+                "includeFillet" : false,
+                "capVoid" : false,
+                "leaveOpen" : true });
+
+    var matchEdges = [];
+    var edgeQuery = qUnion([qOwnedByBody(definition.shutoff, EntityType.EDGE), qCreatedBy(id + "trimPartingPlane" + "splitFaces", EntityType.EDGE)]);
+
+    for (var edge in evaluateQuery(context, qLoopEdges(qCreatedBy(interlockId, EntityType.FACE))))
+    {
+        var midPoint = evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 }).origin;
+        var otherEdge = qContainsPoint(edgeQuery, midPoint);
+
+        if (evaluateQuery(context, otherEdge) != [])
+        {
+            matchEdges = append(matchEdges, { "topology1" : edge,
+                        "topology2" : otherEdge,
+                        "matchType" : TopologyMatchType.COINCIDENT });
+        }
+    }
+
+    try silent
+    {
+        opBoolean(context, id + "booleanInterlockShutoffSurface", {
+                    "tools" : qUnion([definition.shutoff, qCreatedBy(interlockId, EntityType.BODY), qCreatedBy(id + "partingPlane", EntityType.BODY)]),
+                    "operationType" : BooleanOperationType.UNION,
+                    "allowSheets" : true,
+                    "matches" : matchEdges,
+                    "recomputeMatches" : true });
+    }
+}
+
+function nonCoincidentFaces(context is Context, definition is map, faces is Query) returns Query
+{
+    var coincides = qNothing();
+
+    for (var wall in evaluateQuery(context, definition.stockWalls))
+    {
+        var wallPlane = evFaceTangentPlane(context, { "face" : wall, "parameter" : vector(0.5, 0.5) });
+        coincides = qUnion([coincides, qCoincidesWithPlane(faces, wallPlane)]);
+    }
+
+    return qSubtraction(faces, coincides);
+}
+
+function trimFaces(context is Context, id is Id, target is Query, bodyTool is Query, outer is boolean)
+{
+    try silent
+    {
+        opSplitFace(context, id + "splitFaces", { "faceTargets" : target, "bodyTools" : bodyTool });
+
+        var deleteFaces = qNothing();
+        var deleteBodies = qNothing();
+
+        var faces = evCollision(context, { "targets" : target, "tools" : bodyTool });
+
+        for (var face in faces)
+        {
+            if (outer && face["type"] == ClashType.ABUT_NO_CLASS)
+            {
+                deleteFaces = qUnion([deleteFaces, face.target]);
+            }
+            else if (!outer && face["type"] == ClashType.INTERFERE)
+            {
+                deleteFaces = qUnion([deleteFaces, face.target]);
+            }
+        }
+
+        opDeleteFace(context, id + "deleteTrimmedFaces", {
+                    "deleteFaces" : deleteFaces, "includeFillet" : false, "capVoid" : false, "leaveOpen" : true });
+
+        // remove any bodies outside of stock area
+        for (var body in evaluateQuery(context, qEntityFilter(target, EntityType.BODY)))
+        {
+            var bodies = evCollision(context, {
+                    "tools" : body,
+                    "targets" : bodyTool });
+
+            if (size(bodies) == 0)
+            {
+                deleteBodies = qUnion([deleteBodies, body]);
+            }
+        }
+
+        if (evaluateQuery(context, deleteBodies) != [])
+        {
+            opDeleteBodies(context, id + "deleteTrimmedBodies", { "entities" : deleteBodies });
+        }
+    }
+}
+
+function knitShutOffs(context is Context, id is Id, definition is map)
+{
+    // For multiple selected shutoff surfaces
+    if (size(evaluateQuery(context, definition.shutoff)) > 1)
+    {
+        var mainSurface = qAttributeQuery({ "name" : "moldShutOffSurface" });
+        var shutOffs = qUnion([mainSurface, definition.shutoff]);
+
+        if (evaluateQuery(context, mainSurface) == [])
+        {
+            mainSurface = qNthElement(shutOffs, 0);
+        }
+
+        var matchEdges = [];
+
+        for (var i = 1; i < size(evaluateQuery(context, shutOffs)); i += 1)
+        {
+            var mainEdge = qNothing();
+            var otherEdge = qNothing();
+
+            for (var edge in evaluateQuery(context, qLoopEdges(qOwnedByBody(qNthElement(shutOffs, i), EntityType.EDGE))))
+            {
+                var midPoint = evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 }).origin;
+                mainEdge = edge;
+                otherEdge = qContainsPoint(qOwnedByBody(mainSurface, EntityType.EDGE), midPoint);
+
+                if (evaluateQuery(context, otherEdge) != [])
+                    break;
+            }
+
+            if (size(evaluateQuery(context, qUnion([mainEdge, otherEdge]))) == 2)
+            {
+                matchEdges = append(matchEdges, { "topology1" : mainEdge,
+                            "topology2" : otherEdge,
+                            "matchType" : TopologyMatchType.COINCIDENT });
+            }
+        }
+
+        try silent
+        {
+            opBoolean(context, id + "boolean", {
+                        "tools" : definition.shutoff,
+                        "operationType" : BooleanOperationType.UNION,
+                        "allowSheets" : true,
+                        "matches" : matchEdges,
+                        "recomputeMatches" : true });
+        }
+    }
+}
+
+function extend(context is Context, id is Id, definition is map, edges is Query, extendType is string)
+{
+    extendType = toString(extendType);
+
+    if (extendType == "EXCLUDE")
+    {
+        return;
+    }
+
+    if (extendType == "EXTEND")
+    {
+        try silent
+        {
+            opExtendSheetBody(context, id + "extend", { "entities" : edges,
+                        "endCondition" : ExtendEndType.EXTEND_BLIND,
+                        "extendDistance" : definition.stockSize });
+        }
+        catch
+        {
+            definition.error[].status = 2;
+            definition.error[].error = "Unable to extend all edges. Select edges to exclude or extrude.";
+        }
+    }
+    else if (extendType == "OFFSET")
+    {
+        var innerLoop = pathArray(context, edges, definition.stockSize / 10000); // tolerance used to get exact match of inner loop
+        var surfs = definition.shutoff;
+        var matches = [];
+
+        for (var i = 0; i < size(innerLoop); i += 1)
+        {
+            if (definition.smooth)
+            {
+                var pathLength = evPathLength(context, innerLoop[i]);
+                var pathIncrement = range(0, 1, ceil(pathLength / definition.smoothFactor));
+                var edgeArray = [];
+                var pathLines = evPathTangentLines(context, innerLoop[i], pathIncrement).tangentLines;
+
+                for (var j = 0; j < size(pathLines); j += 1)
+                {
+                    var lineStart = pathLines[j].origin;
+                    var lineEnd = getOutlineNormal(context, id, definition, lineStart, pathLines[j].direction);
+
+                    if (innerLoop[i].closed && j == size(pathLines) - 1)
+                    {
+                        break;
+                    }
+                    opFitSpline(context, id + ("fitSpline" ~ i) + j, { "points" : [lineStart, lineEnd] });
+
+                    edgeArray = append(edgeArray, qCreatedBy(id + ("fitSpline" ~ i) + j, EntityType.EDGE));
+                }
+
+                opLoft(context, id + ("smoothSurface" ~ i), {
+                            "profileSubqueries" : edgeArray,
+                            "guideSubqueries" : [qUnion(innerLoop[i].edges)],
+                            "bodyType" : ToolBodyType.SURFACE,
+                            "makePeriodic" : innerLoop[i].closed ? true : false });
+
+                surfs = qUnion([surfs, qCreatedBy(id + ("smoothSurface" ~ i), EntityType.BODY)]);
+
+                var midPoint = evEdgeTangentLine(context, { "edge" : innerLoop[i].edges[0], "parameter" : 0.5 }).origin;
+
+                matches = append(matches, { "topology1" : innerLoop[i].edges[0],
+                            "topology2" : qContainsPoint(qCreatedBy(id + ("smoothSurface" ~ i), EntityType.EDGE), midPoint),
+                            "matchType" : TopologyMatchType.COINCIDENT });
+
+                opDeleteBodies(context, id + ("deleteWires" ~ i), { "entities" : qUnion(edgeArray) });
+            }
+            else
+            {
+                opExtrude(context, id + ("extrudeOffset" ~ i), {
+                            "entities" : qUnion(innerLoop[i].edges),
+                            "direction" : -definition.plane.normal,
+                            "endBound" : BoundingType.UP_TO_NEXT });
+
+                var topEdges = startTracking(context, qCapEntity(id + ("extrudeOffset" ~ i), CapType.START, EntityType.EDGE));
+                var bottomEdges = startTracking(context, qCapEntity(id + ("extrudeOffset" ~ i), CapType.END, EntityType.EDGE));
+
+                var thickness = getThicknessDirection(context, id, definition, qCreatedBy(id + ("extrudeOffset" ~ i), EntityType.FACE), topEdges);
+                var thickenId;
+                var intEdges;
+
+                try silent
+                {
+                    if (thickness == [])
+                    {
+                        throw false;
+                    }
+
+                    try silent
+                    {
+                        opThicken(context, id + ("thickenOffsetA-" ~ i), {
+                                    "entities" : qCreatedBy(id + ("extrudeOffset" ~ i), EntityType.FACE),
+                                    thickness[0] : definition.stockSize,
+                                    thickness[1] : 0 * meter });
+
+                        thickenId = id + ("thickenOffsetA-" ~ i);
+                    }
+                    catch
+                    {
+                        opThicken(context, id + ("thickenOffsetB-" ~ i), {
+                                    "entities" : qCreatedBy(id + ("extrudeOffset" ~ i), EntityType.FACE),
+                                    thickness[0] : 3 * millimeter,
+                                    thickness[1] : 0 * meter });
+
+                        thickenId = id + ("thickenOffsetB-" ~ i);
+                    }
+
+                    var bottomPlane = evFaceTangentPlane(context, { "face" : definition.stockBottomFace, "parameter" : vector(0.5, 0.5) });
+
+                    var sideFaces = qCreatedBy(thickenId, EntityType.FACE);
+                    sideFaces = qSubtraction(sideFaces, qParallelPlanes(sideFaces, bottomPlane, true));
+                    sideFaces = qSubtraction(sideFaces, qEntityFilter(topEdges, EntityType.FACE));
+                    sideFaces = qSubtraction(sideFaces, qEntityFilter(bottomEdges, EntityType.FACE));
+
+                    var sliverFaces = qSubtraction(sideFaces, qAdjacent(bottomEdges, AdjacencyType.EDGE, EntityType.FACE));
+
+                    sideFaces = qSubtraction(sideFaces, sliverFaces);
+
+                    var capEnd = thickness[0] == "thickness1" ? CapType.END : CapType.START;
+                    intEdges = qCapEntity(thickenId, capEnd, EntityType.EDGE);
+
+                    opDeleteFace(context, id + ("deleteSideFaces" ~ i), {
+                                "deleteFaces" : sideFaces,
+                                "includeFillet" : false,
+                                "capVoid" : false,
+                                "leaveOpen" : true });
+
+                    var topFaces = qOwnedByBody(qOwnerBody(topEdges), EntityType.FACE);
+
+                    var extEdges = qSubtraction(qLoopEdges(topFaces), intEdges);
+
+                    if (evaluateQuery(context, sliverFaces) != [])
+                    {
+                        definition.error[].status = 2;
+                        definition.error[].error = "Parting surface contains small sliver faces.";
+                    }
+
+                    opDeleteBodies(context, id + ("deleteExtrudeOffset" ~ i), {
+                                "entities" : qUnion([qCreatedBy(id + ("extrudeOffset" ~ i)), qOwnerBody(bottomEdges)]) });
+
+                    if (thickenId == id + ("thickenOffsetB-" ~ i))
+                    {
+                        opExtendSheetBody(context, id + ("extendEdges" ~ i), { "entities" : extEdges,
+                                    "endCondition" : ExtendEndType.EXTEND_BLIND,
+                                    "extendDistance" : definition.stockSize });
+                    }
+                }
+                catch
+                {
+                    opDeleteBodies(context, id + ("deleteExtrudeOffset" ~ i), {
+                                "entities" : qUnion([qCreatedBy(id + ("extrudeOffset" ~ i)), qOwnerBody(bottomEdges)]) });
+
+                    definition.error[].status = 2;
+                    definition.error[].error = "Failed to offset edges. Try smooth offset, exclude edges or different parting surface type.";
+                    return;
+                }
+
+                surfs = qUnion([surfs, qCreatedBy(thickenId, EntityType.BODY)]);
+
+                var midPoint = evEdgeTangentLine(context, { "edge" : innerLoop[i].edges[0], "parameter" : 0.5 }).origin;
+
+                matches = append(matches, { "topology1" : innerLoop[i].edges[0],
+                            "topology2" : qContainsPoint(intEdges, midPoint),
+                            "matchType" : TopologyMatchType.COINCIDENT });
+            }
+        }
+
+        try silent
+        {
+            opBoolean(context, id + "booleanPartingSurface", {
+                        "tools" : surfs,
+                        "operationType" : BooleanOperationType.UNION,
+                        "allowSheets" : true,
+                        "matches" : matches,
+                        "recomputeMatches" : true });
+        }
+        catch
+        {
+            definition.error[].status = 2;
+            definition.error[].error = "Unable to merge Parting surface to Shut-off surface.";
+        }
+    }
+    else if (extendType == "EXTRUDE" || extendType == "FLIP")
+    {
+        var count = 0;
+        var matchEdges = [];
+
+        for (var edge in evaluateQuery(context, edges))
+        {
+            var error = true;
+            var midPoint = evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 });
+            var wall = getClosest(context, id, definition, edge, extendType == "FLIP");
+
+            if (wall.face != undefined)
+            {
+                try silent
+                {
+                    // this is slightly faster than opExtrude
+                    opFitSpline(context, id + "extrudeSurface" + toString(count) + "path", { "points" : [midPoint.origin, midPoint.origin + wall.direction * definition.stockSize * 2] });
+
+                    opSweep(context, id + "extrudeSurface" + toString(count) + "sweep", {
+                                "profiles" : edge,
+                                "path" : qCreatedBy(id + "extrudeSurface" + toString(count) + "path", EntityType.EDGE),
+                                "keepProfileOrientation" : true });
+
+                    matchEdges = append(matchEdges, { "topology1" : edge,
+                                "topology2" : qContainsPoint(qCreatedBy(id + "extrudeSurface" + toString(count) + "sweep", EntityType.EDGE), midPoint.origin),
+                                "matchType" : TopologyMatchType.COINCIDENT });
+
+                    error = false;
+                }
+
+                count += 1;
+            }
+
+            if (error)
+            {
+                definition.error[].status = 1;
+                definition.error[].error = "Some edges could not be extruded.";
+                definition.error[].entities = makeRobustQuery(context, qUnion([definition.error[].entities, edge]));
+            }
+        }
+
+        try silent
+        {
+            opDeleteBodies(context, id + "deleteSweepWires", { "entities" : qCreatedBy(id + "extrudeSurface" + ANY_ID + "path", EntityType.BODY) });
+        }
+
+        if (evaluateQuery(context, qCreatedBy(id + "extrudeSurface", EntityType.BODY)) != [])
+        {
+            try silent
+            {
+                opBoolean(context, id + "booleanExtrudePartingSurface", {
+                            "tools" : qUnion([definition.shutoff, qCreatedBy(id + "extrudeSurface", EntityType.BODY)]),
+                            "operationType" : BooleanOperationType.UNION,
+                            "allowSheets" : true,
+                            "matches" : matchEdges,
+                            "recomputeMatches" : true });
+            }
+            catch
+            {
+                definition.error[].status = 2;
+                definition.error[].error = "Unable to add surfaces to shut-off surface. Try a different parting surface type.";
+                return;
+            }
+        }
+        else
+        {
+            return;
+        }
+
+        matchEdges = [];
+        count = 0;
+
+        // Fill gaps at direction changes
+        for (var vertex in evaluateQuery(context, qCreatedBy(id + "extrudeSurface", EntityType.VERTEX)))
+        {
+            try silent
+            {
+                if (insideBox3d(fromWorld(definition.cSys, evVertexPoint(context, { "vertex" : vertex })), definition.stockBox))
+                {
+                    var openEdges = qSubtraction(qEdgeTopologyFilter(qAdjacent(vertex, AdjacencyType.VERTEX, EntityType.EDGE), EdgeTopology.ONE_SIDED), definition.outerLoop);
+
+                    if (size(evaluateQuery(context, openEdges)) == 2)
+                    {
+                        try silent
+                        {
+                            var startEdge = startTracking(context, { "subquery" : qNthElement(openEdges, 0), "trackPartialDependency" : true });
+
+                            opSweep(context, id + "sweepFill" + toString(count), {
+                                        "profiles" : qNthElement(openEdges, 0),
+                                        "path" : qNthElement(openEdges, 1)
+                                    });
+
+                            matchEdges = append(matchEdges, { "topology1" : qNthElement(openEdges, 0),
+                                        "topology2" : qNthElement(qEntityFilter(startEdge, EntityType.EDGE), 0),
+                                        "matchType" : TopologyMatchType.COINCIDENT });
+                        }
+                        catch
+                        {
+                            definition.error[].status = 2;
+                            definition.error[].error = "Some corners could not be filled.";
+                        }
+
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        if (evaluateQuery(context, qCreatedBy(id + "sweepFill", EntityType.BODY)) != [])
+        {
+            opBoolean(context, id + "booleanSweepFill", {
+                        "tools" : qUnion([definition.shutoff, qCreatedBy(id + "sweepFill" + ANY_ID, EntityType.BODY)]),
+                        "operationType" : BooleanOperationType.UNION,
+                        "allowSheets" : true,
+                        "matches" : matchEdges,
+                        "recomputeMatches" : true });
+        }
+    }
+}
+
+function processChangedEdges(context is Context, id is Id, definition is map) returns map
+{
+    var changedEdges = {};
+    changedEdges.exclude = qNothing();
+    changedEdges.extend = qNothing();
+    changedEdges.extrude = qNothing();
+    changedEdges.flip = qNothing();
+    changedEdges.offset = qNothing();
+
+    for (var item in definition.changeEdges)
+    {
+        var extendType = toString(item.edgeExtendType);
+
+        if (extendType == "EXCLUDE")
+        {
+            changedEdges.exclude = qUnion([changedEdges.exclude, item.entity]);
+        }
+        else if (extendType == "EXTEND")
+        {
+            changedEdges.extend = qUnion([changedEdges.extend, item.entity]);
+        }
+        else if (extendType == "EXTRUDE")
+        {
+            changedEdges.extrude = qUnion([changedEdges.extrude, item.entity]);
+        }
+        else if (extendType == "FLIP")
+        {
+            changedEdges.flip = qUnion([changedEdges.flip, item.entity]);
+        }
+        else if (extendType == "OFFSET")
+        {
+            changedEdges.offset = qUnion([changedEdges.offset, item.entity]);
+        }
+    }
+
+    changedEdges.selected = qUnion([changedEdges.exclude, changedEdges.extend, changedEdges.extrude, changedEdges.flip, changedEdges.offset]);
+    changedEdges.remainder = qSubtraction(definition.outerLoop, changedEdges.selected);
+
+    return changedEdges;
+}
+
+function getOuterLoop(context is Context, definition is map) returns Query
+{
+    var outerLoopEdge;
+    var allEdges = definition.allLoops;
+    var maxLoopSize = 0 * meter;
+
+    for (var i = 0; i < size(evaluateQuery(context, allEdges)); i += 1)
+    {
+        var loopEdges = qLoopEdges(qNthElement(allEdges, 0));
+        if (evaluateQuery(context, loopEdges) == [])
+        {
+            break;
+        }
+        var loopSize = evBox3d(context, { "topology" : loopEdges, "cSys" : definition.cSys, "tight" : true });
+        loopSize = evDistance(context, { "side0" : loopSize.minCorner, "side1" : loopSize.maxCorner }).distance;
+
+        if (loopSize > maxLoopSize)
+        {
+            maxLoopSize = loopSize;
+            outerLoopEdge = qNthElement(loopEdges, 0);
+        }
+        allEdges = qSubtraction(allEdges, loopEdges);
+    }
+
+    return makeRobustQuery(context, qLoopEdges(outerLoopEdge));
+}
+
+function pathArray(context is Context, edges is Query, tolerance is ValueWithUnits) returns array
+{
+    var endPoints = [];
+    var edgeOrder = [];
+    var flipped = [];
+    var loops = [];
+    var numLoops = 0;
+    var lastPoint = 0;
+    var nextPoint = 0;
+    var closed = false;
+
+    for (var edge in evaluateQuery(context, edges))
+    {
+        var points = evEdgeTangentLines(context, { "edge" : edge, "parameters" : [0, 1] });
+        endPoints = append(endPoints, points[0].origin);
+        endPoints = append(endPoints, points[1].origin);
+    }
+
+    var clusters = clusterPoints(endPoints, tolerance);
+    var index = 0;
+
+    for (var i = 0; i < size(clusters); i += 1)
+    {
+        if (size(clusters[i]) % 2 == 1)
+        {
+            numLoops += 0.5;
+            lastPoint = clusters[i][0];
+            index = i;
+        }
+    }
+
+    clusters = removeIndex(clusters, index);
+
+    if (numLoops == 0)
+    {
+        numLoops = 1;
+        closed = true;
+    }
+
+    for (var loop = 0; loop < numLoops; loop += 1)
+    {
+        edgeOrder = [qNthElement(edges, floor(lastPoint / 2))];
+        flipped = [lastPoint % 2 == 1 ? true : false];
+        nextPoint = lastPoint % 2 == 1 ? lastPoint - 1 : lastPoint + 1;
+
+        for (var i = 0; i < size(clusters); i += 1)
+        {
+            if (isIn(nextPoint, clusters[i]))
+            {
+                var nextPointArray = filter(clusters[i], function(x)
+                {
+                    return x != nextPoint;
+                });
+
+                clusters = removeIndex(clusters, i);
+
+                if (nextPointArray != [])
+                {
+                    lastPoint = nextPointArray[0];
+                    edgeOrder = append(edgeOrder, qNthElement(edges, floor(lastPoint / 2)));
+                    flipped = append(flipped, lastPoint % 2 == 1 ? true : false);
+                    nextPoint = lastPoint % 2 == 1 ? lastPoint - 1 : lastPoint + 1;
+                    i = -1; // reset
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        loops = append(loops, { "edges" : edgeOrder, "flipped" : flipped, "closed" : closed } as Path);
+
+        if (loop < numLoops - 1)
+        {
+            for (var i = 0; i < size(clusters); i += 1)
+            {
+                if (size(clusters[i]) % 2 == 1)
+                {
+                    lastPoint = clusters[i][0];
+                    index = i;
+                }
+            }
+            clusters = removeIndex(clusters, index);
+        }
+    }
+
+    return loops;
+}
+
+function removeIndex(arr is array, index is number) returns array
+{
+    var endIndex = size(arr);
+    var startArray = subArray(arr, 0, index);
+
+    if (index < endIndex)
+    {
+        startArray = concatenateArrays([startArray, subArray(arr, index + 1, endIndex)]);
+    }
+    return startArray;
+}
+
+function createOutline(context is Context, id is Id, definition is map) returns Query
+{
+    // Create outline of shutoff surface and offset to determine parting surface direction
+    opPlane(context, id + "outlinePlane", {
+                "plane" : definition.outlinePlane,
+                "width" : definition.stockSize,
+                "height" : definition.stockSize });
+
+    opCreateOutline(context, id + "outlineSurface", {
+                "tools" : definition.shutoff,
+                "target" : qCreatedBy(id + "outlinePlane", EntityType.FACE) });
+
+    opExtrude(context, id + "outlineBody", {
+                "entities" : qCreatedBy(id + "outlineSurface", EntityType.FACE),
+                "direction" : definition.outlinePlane.normal,
+                "endBound" : BoundingType.BLIND,
+                "endDepth" : definition.stockHeight });
+
+    opOffsetFace(context, id + "outlineOffset", {
+                "moveFaces" : qNonCapEntity(id + "outlineBody", EntityType.FACE),
+                "offsetDistance" : -0.01 * millimeter });
+
+    opDeleteBodies(context, id + "deleteOutlines", {
+                "entities" : qUnion([qCreatedBy(id + "outlinePlane"), qCreatedBy(id + "outlineSurface")]) });
+
+    return qCreatedBy(id + "outlineBody", EntityType.BODY);
+}
+
+function getOutlineNormal(context is Context, id is Id, definition is map, origin is Vector, tangent is Vector) returns Vector
+{
+    tangent -= dot(tangent, definition.plane.normal) / dot(definition.plane.normal, definition.plane.normal) * definition.plane.normal;
+
+    var direction = cross(tangent, definition.plane.normal);
+    var endPoint = origin + direction * 0.15 * millimeter;
+
+    direction *= evaluateQuery(context, qContainsPoint(qCreatedBy(id + "outlineBody", EntityType.BODY), endPoint)) == [] ? 1 : -1;
+
+    return origin + definition.stockSize * direction;
+}
+
+function getThicknessDirection(context is Context, id is Id, definition is map, faces is Query, topEdges is Query) returns array
+{
+    var direction = ["thickness1", "thickness2"];
+    var tempId = id + "thickenTest";
+
+    startFeature(context, tempId);
+
+    try silent
+    {
+        opThicken(context, tempId + "thickenTest", {
+                    "entities" : faces,
+                    "thickness1" : 0.15 * millimeter,
+                    "thickness2" : 0 * meter });
+    }
+
+    var insideVertices = qAdjacent(qIntersection([topEdges, qCapEntity(tempId + "thickenTest", CapType.START, EntityType.EDGE)]), AdjacencyType.VERTEX, EntityType.VERTEX);
+
+    if (evaluateQuery(context, insideVertices) == [])
+    {
+        direction = [];
+    }
+    else if (evaluateQuery(context, qContainsPoint(qCreatedBy(id + "outlineBody", EntityType.BODY), evVertexPoint(context, { "vertex" : insideVertices }))) != [])
+    {
+        direction = ["thickness2", "thickness1"];
+    }
+
+    endFeature(context, tempId);
+
+    return direction;
+}
+
+function clashes(context is Context, id is Id, definition is map, edge is Query, point is Vector, direction is Vector) returns boolean
+{
+    var collides = false;
+
+    startFeature(context, id);
+    try silent
+    {
+        // this is slightly faster than opExtrude
+        opFitSpline(context, id + "path", { "points" : [point, point + direction * definition.stockSize * 2] });
+
+        opSweep(context, id + "sweep", {
+                    "profiles" : edge,
+                    "path" : qCreatedBy(id + "path", EntityType.EDGE),
+                    "keepProfileOrientation" : true });
+
+        var collisions = evCollision(context, {
+                "tools" : qCreatedBy(id + "sweep", EntityType.BODY),
+                "targets" : definition.outline });
+
+        for (var collision in collisions)
+        {
+            if (collision["type"] == ClashType.INTERFERE)
+                collides = true;
+        }
+    }
+    catch
+    {
+        collides = true;
+    }
+    abortFeature(context, id);
+
+    return collides;
+}
+
+function getClosest(context is Context, id is Id, definition is map, edge is Query, flip is boolean) returns map
+{
+    var sideWalls = definition.stockWalls;
+    var midPoint = evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 });
+    var walls = qNothing();
+
+    while (evaluateQuery(context, sideWalls) != [] && size(evaluateQuery(context, walls)) < (flip ? 2 : 1))
+    {
+        var wall = qClosestTo(sideWalls, midPoint.origin);
+        var normal = evFaceTangentPlane(context, { "face" : wall, "parameter" : vector(0.5, 0.5) }).normal;
+
+        if (!clashes(context, id + "clash", definition, edge, midPoint.origin, normal))
+            walls = qUnion([walls, wall]);
+
+        sideWalls = qSubtraction(sideWalls, wall);
+    }
+
+    var solutions = size(evaluateQuery(context, walls));
+
+    if (solutions == 0)
+    {
+        return {};
+    }
+
+    if (solutions == 1)
+        flip = false;
+
+    var wall = qClosestTo(walls, midPoint.origin);
+
+    if (flip)
+        wall = qClosestTo(qSubtraction(walls, wall), midPoint.origin); // this may need revising after more testing
+
+    return { "face" : wall,
+            "direction" : evFaceTangentPlane(context, { "face" : wall, "parameter" : vector(0.5, 0.5) }).normal,
+            "distance" : evDistance(context, { "side0" : midPoint.origin, "side1" : wall, "maximum" : true }).distance };
+}
+
+export function editValues(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    try silent
+    {
+        if (oldDefinition.shutoff == undefined)
+        {
+            definition.shutoff = qAttributeQuery({ "name" : "moldShutOffSurface" });
+        }
+        if (oldDefinition.stock == undefined)
+        {
+            definition.stock = qAttributeQuery({ "name" : "moldStock" });
+        }
+        if (oldDefinition.direction == undefined)
+        {
+            definition.direction = qAttributeQuery({ "name" : "moldEjectionDirection" });
+        }
+    }
+    return definition;
+}
+
+export enum EXTEND_TYPE
+{
+    annotation { "Name" : "Exclude" }
+    EXCLUDE,
+    annotation { "Name" : "Extend" }
+    EXTEND,
+    annotation { "Name" : "Extrude" }
+    EXTRUDE,
+    annotation { "Name" : "Offset" }
+    OFFSET
+}
+
+export enum EDGE_EXTEND_TYPE
+{
+    annotation { "Name" : "Exclude" }
+    EXCLUDE,
+    annotation { "Name" : "Extend" }
+    EXTEND,
+    annotation { "Name" : "Extrude" }
+    EXTRUDE,
+    annotation { "Name" : "Extrude Flipped" }
+    FLIP,
+    // annotation {"Name" : "Fill"}
+    // FILL
+}
+
+export enum INTERLOCK_TYPE
+{
+    annotation { "Name" : "Sketch" }
+    SKETCH,
+    annotation { "Name" : "Dimension" }
+    OFFSET
+}
+
+export enum INTERLOCK_PLANE
+{
+    annotation { "Name" : "Dimension" }
+    OFFSET,
+    annotation { "Name" : "Plane" }
+    PLANE
+}
+
+const DRAFT_ANGLE =
+{
+            (degree) : [0, 2, 60]
+        } as AngleBoundSpec;
+
+const INTERLOCK =
+{
+            (millimeter) : [0, 10, 1e6],
+            (inch) : 0.375
+        } as LengthBoundSpec;
