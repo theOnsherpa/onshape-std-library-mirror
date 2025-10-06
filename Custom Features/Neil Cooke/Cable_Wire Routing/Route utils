@@ -1,0 +1,1657 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "onshape/std/mateconnectoraxistype.gen.fs", version : "2641.0");
+export import(path : "c5f92231ed0bc7d8ebdc2343/889d12d239b7a39457e54257/3c1eea9e4a5ae8dc39e1cbf1", version : "19f02e7a368f39ba9afb4c26");
+
+// constants & enums
+
+export const V_195 = 195; // change to clip IDs
+export const V_204 = 204; // change to connector UI
+
+export enum ColorSelection
+{
+    annotation { "Name" : "Black" }
+    BLACK,
+    annotation { "Name" : "Blue" }
+    BLUE,
+    annotation { "Name" : "Brown" }
+    BROWN,
+    annotation { "Name" : "Copper" }
+    COPPER,
+    annotation { "Name" : "Cyan" }
+    CYAN,
+    annotation { "Name" : "Gray" }
+    GRAY,
+    annotation { "Name" : "Green" }
+    GREEN,
+    annotation { "Name" : "Magenta" }
+    MAGENTA,
+    annotation { "Name" : "Orange" }
+    ORANGE,
+    annotation { "Name" : "Pink" }
+    PINK,
+    annotation { "Name" : "Red" }
+    RED,
+    annotation { "Name" : "Turquoise" }
+    TURQUOISE,
+    annotation { "Name" : "White" }
+    WHITE,
+    annotation { "Name" : "Yellow" }
+    YELLOW
+}
+
+export enum EditAction
+{
+    annotation { "Name" : "Edit" }
+    EDIT,
+    annotation { "Name" : "Add" }
+    ADD,
+    annotation { "Name" : "Remove" }
+    REMOVE,
+    annotation { "Name" : "Nudge" }
+    NUDGE
+}
+
+export enum StripTo
+{
+    annotation { "Name" : "at both ends" }
+    NONE,
+    annotation { "Name" : "at first end" }
+    CABLE_FIRST,
+    annotation { "Name" : "at second end" }
+    CABLE_LAST,
+    annotation { "Name" : "cable only" }
+    CABLE,
+    annotation { "Name" : "to first clip" }
+    FIRST,
+    annotation { "Name" : "to last clip" }
+    LAST,
+    annotation { "Name" : "to both clips" }
+    BOTH,
+    annotation { "Name" : "deprecated" }
+    DEPRECATED,
+}
+
+export enum StripFirst
+{
+    annotation { "Name" : "at first end" }
+    STRIP,
+    annotation { "Name" : "cable only" }
+    CABLE,
+    annotation { "Name" : "to first clip" }
+    CLIP
+}
+
+export enum StripSecond
+{
+    annotation { "Name" : "at second end" }
+    STRIP,
+    annotation { "Name" : "cable only" }
+    CABLE,
+    annotation { "Name" : "to last clip" }
+    CLIP
+}
+
+export enum WireUnits
+{
+    annotation { "Name" : "millimeter" }
+    millimeter,
+    annotation { "Name" : "centimeter" }
+    centimeter,
+    annotation { "Name" : "meter" }
+    meter,
+    annotation { "Name" : "inch" }
+    inch,
+    annotation { "Name" : "foot" }
+    foot,
+    annotation { "Name" : "yard" }
+    yard
+}
+
+export enum WireGeometry
+{
+    annotation { "Name" : "Diameter" }
+    DIAMETER,
+    annotation { "Name" : "Gauge" }
+    GAUGE,
+    annotation { "Name" : "Area" }
+    AREA
+}
+
+export enum WireGauge
+{
+    annotation { "Name" : "0000" }
+    G0000,
+    annotation { "Name" : "000" }
+    G000,
+    annotation { "Name" : "00" }
+    G00,
+    annotation { "Name" : "0" }
+    G0,
+    annotation { "Name" : "1" }
+    G1,
+    annotation { "Name" : "2" }
+    G2,
+    annotation { "Name" : "3" }
+    G3,
+    annotation { "Name" : "4" }
+    G4,
+    annotation { "Name" : "5" }
+    G5,
+    annotation { "Name" : "6" }
+    G6,
+    annotation { "Name" : "7" }
+    G7,
+    annotation { "Name" : "8" }
+    G8,
+    annotation { "Name" : "9" }
+    G9,
+    annotation { "Name" : "10" }
+    G10,
+    annotation { "Name" : "11" }
+    G11,
+    annotation { "Name" : "12" }
+    G12,
+    annotation { "Name" : "13" }
+    G13,
+    annotation { "Name" : "14" }
+    G14,
+    annotation { "Name" : "15" }
+    G15,
+    annotation { "Name" : "16" }
+    G16,
+    annotation { "Name" : "17" }
+    G17,
+    annotation { "Name" : "18" }
+    G18,
+    annotation { "Name" : "19" }
+    G19,
+    annotation { "Name" : "20" }
+    G20,
+    annotation { "Name" : "21" }
+    G21,
+    annotation { "Name" : "22" }
+    G22,
+    annotation { "Name" : "23" }
+    G23,
+    annotation { "Name" : "24" }
+    G24,
+    annotation { "Name" : "25" }
+    G25,
+    annotation { "Name" : "26" }
+    G26,
+    annotation { "Name" : "27" }
+    G27,
+    annotation { "Name" : "28" }
+    G28,
+    annotation { "Name" : "29" }
+    G29,
+    annotation { "Name" : "30" }
+    G30,
+    annotation { "Name" : "31" }
+    G31,
+    annotation { "Name" : "32" }
+    G32,
+    annotation { "Name" : "33" }
+    G33,
+    annotation { "Name" : "34" }
+    G34,
+    annotation { "Name" : "35" }
+    G35,
+    annotation { "Name" : "36" }
+    G36,
+    annotation { "Name" : "37" }
+    G37,
+    annotation { "Name" : "38" }
+    G38,
+    annotation { "Name" : "39" }
+    G39,
+    annotation { "Name" : "40" }
+    G40
+}
+
+export enum MeasureType
+{
+    annotation { "Name" : "strip length" }
+    Strip,
+    annotation { "Name" : "to connectors" }
+    Connector,
+}
+
+// container functions
+
+export function argIn(inputValue, container is array)
+{
+    var element;
+
+    for (var i, elementValue in container)
+    {
+        if (elementValue is map) // specifically for wire packing
+            if (inputValue == elementValue.id)
+            return elementValue;
+        else
+            continue;
+
+        if (inputValue == elementValue ||
+            inputValue is ValueWithUnits && tolerantEquals(inputValue, elementValue) ||
+            inputValue is string && toLower(inputValue) == toLower(elementValue))
+        {
+            element = i;
+            break;
+        }
+    }
+
+    return element;
+}
+
+// string functions
+
+function hexToDecimal(text is string) returns number
+{
+    const hexValues = {
+            "0" : 0,
+            "1" : 1,
+            "2" : 2,
+            "3" : 3,
+            "4" : 4,
+            "5" : 5,
+            "6" : 6,
+            "7" : 7,
+            "8" : 8,
+            "9" : 9,
+            "a" : 10,
+            "b" : 11,
+            "c" : 12,
+            "d" : 13,
+            "e" : 14,
+            "f" : 15
+        };
+
+    const splitHex = splitIntoCharacters(text);
+
+    return (hexValues[splitHex[0]] * 16 + hexValues[splitHex[1]]) / 255;
+}
+
+export function split(text is string, delimiter is string) returns array
+{
+    return split(text, delimiter, true);
+}
+
+export function split(text is string, delimiter is string, remove is boolean) returns array
+{
+    var substrings = [""];
+
+    for (var char in splitIntoCharacters(text))
+        if (match(char, delimiter).hasMatch)
+            substrings = append(substrings, "");
+        else
+            substrings[size(substrings) - 1] ~= char;
+
+    substrings = mapArray(substrings, function(substring)
+        {
+            return trim(substring);
+        });
+
+    return remove ? filter(substrings, function(substring)
+            {
+                return substring != "";
+            }) : substrings;
+}
+
+export function toLower(text is string) returns string
+{
+    const characters = {
+            "A" : "a",
+            "B" : "b",
+            "C" : "c",
+            "D" : "d",
+            "E" : "e",
+            "F" : "f",
+            "G" : "g",
+            "H" : "h",
+            "I" : "i",
+            "J" : "j",
+            "K" : "k",
+            "L" : "l",
+            "M" : "m",
+            "N" : "n",
+            "O" : "o",
+            "P" : "p",
+            "Q" : "q",
+            "R" : "r",
+            "S" : "s",
+            "T" : "t",
+            "U" : "u",
+            "V" : "v",
+            "W" : "w",
+            "X" : "x",
+            "Y" : "y",
+            "Z" : "z"
+        };
+
+    const chars = splitIntoCharacters(text);
+    var result = "";
+
+    for (var i = 0; i < size(chars); i += 1)
+        result ~= characters[chars[i]] == undefined ? chars[i] : characters[chars[i]];
+
+    return result;
+}
+
+export function toUpper(text is string) returns string
+{
+    const characters = {
+            "a" : "A",
+            "b" : "B",
+            "c" : "C",
+            "d" : "D",
+            "e" : "E",
+            "f" : "F",
+            "g" : "G",
+            "h" : "H",
+            "i" : "I",
+            "j" : "J",
+            "k" : "K",
+            "l" : "L",
+            "m" : "M",
+            "n" : "N",
+            "o" : "O",
+            "p" : "P",
+            "q" : "Q",
+            "r" : "R",
+            "s" : "S",
+            "t" : "T",
+            "u" : "U",
+            "v" : "V",
+            "w" : "W",
+            "x" : "X",
+            "y" : "Y",
+            "z" : "Z"
+        };
+
+    const chars = splitIntoCharacters(text);
+    var result = "";
+
+    for (var i = 0; i < size(chars); i += 1)
+        result ~= characters[chars[i]] == undefined ? chars[i] : characters[chars[i]];
+
+    return result;
+}
+
+export function trim(text is string) returns string
+{
+    return replace(text, "^(\\s)+|(\\s)+$", "");
+}
+
+export function trim(text is string, remove is string)
+{
+    return trim(replace(text, remove, ""));
+}
+
+// error functions
+
+export function highlightEntities(context is Context, entities is Query, color is DebugColor)
+{
+    for (var i = 0; i < 5; i += 1)
+        addDebugEntities(context, entities, color);
+}
+
+export function errorWarning(context is Context, id is Id, warning is string)
+{
+    if (id is array)
+        id = resize(id, 1);
+    else
+        id = makeId(id);
+
+    if (!isUndefinedOrEmptyString(warning))
+        reportFeatureWarning(context, id, warning);
+}
+
+export function errorInfo(context is Context, id is Id, info is string)
+{
+    if (id is array)
+        id = resize(id, 1);
+    else
+        id = makeId(id);
+
+    if (!isUndefinedOrEmptyString(info))
+        reportFeatureInfo(context, id, info);
+}
+
+// property functions
+
+export function getColor(text is string) returns Color
+{
+    return getColor({ "color" : text });
+}
+
+export function getColor(wireData is map) returns Color
+{
+    var text = "";
+
+    try silent
+    {
+        text = trim(toLower(wireData.color));
+    }
+
+    if (text == "")
+        text = "gray";
+
+    const rgb = split(text, ",");
+    const hex = match(text, "#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})").captures;
+
+    var col = [0.65, 0.65, 0.65]; // gray
+
+    if (hex != [])
+    {
+        for (var index in [0, 1, 2])
+            col[index] = hexToDecimal(hex[index + 1]);
+    }
+    else if (size(rgb) == 3)
+    {
+        for (var index in [0, 1, 2])
+            col[index] = stringToNumber(rgb[index]) / 255;
+    }
+    else
+    {
+        const colorChart = {
+                "red" : color(1, 0, 0),
+                "green" : color(0, 1, 0),
+                "blue" : color(0, 0, 1),
+                "black" : color(0, 0, 0),
+                "yellow" : color(1, 1, 0),
+                "white" : color(1, 1, 1),
+                "magenta" : color(1, 0, 1),
+                "purple" : color(1, 0, 1),
+                "violet" : color(1, 0, 1),
+                "pink" : color(1, 0.4, 0.8),
+                "turquoise" : color(0.25, 0.88, 0.82),
+                "cyan" : color(0, 1, 1),
+                "grey" : color(0.65, 0.65, 0.65),
+                "gray" : color(0.65, 0.65, 0.65),
+                "orange" : color(1, 0.5, 0),
+                "brown" : color(0.6, 0.3, 0),
+                "copper" : color(0.9, 0.5, 0.3)
+            };
+
+        return colorChart[text];
+    }
+
+    return color(col[0], col[1], col[2]);
+}
+
+export function getGlobalVariable(context is Context, variable is string, returnValue)
+{
+    try silent
+    {
+        returnValue = getVariable(context, variable);
+    }
+
+    return returnValue;
+}
+
+export function getWireGeometry(data is map, wireLengthUnits)
+{
+    const gaugeFactor = data.manual == undefined ? 1 : 1000;
+
+    const wireGaugeList = {
+            "0000" : 11.68,
+            "4/0" : 11.68,
+            "000" : 10.40,
+            "3/0" : 10.40,
+            "00" : 9.27,
+            "2/0" : 9.27,
+            "0" : 8.25,
+            "1" : 7.35,
+            "2" : 6.54,
+            "3" : 5.83,
+            "4" : 5.19,
+            "5" : 4.62,
+            "6" : 4.12,
+            "7" : 3.66,
+            "8" : 3.26,
+            "9" : 2.91,
+            "10" : 2.59,
+            "11" : 2.30,
+            "12" : 2.05,
+            "13" : 1.83,
+            "14" : 1.63,
+            "15" : 1.45,
+            "16" : 1.29,
+            "17" : 1.15,
+            "18" : 1.02,
+            "19" : 0.91,
+            "20" : 0.81,
+            "21" : 0.72,
+            "22" : 0.64,
+            "23" : 0.57,
+            "24" : 0.51,
+            "25" : 0.45,
+            "26" : 0.40,
+            "27" : 0.36,
+            "28" : 0.32,
+            "29" : 0.29,
+            "30" : 0.25,
+            "31" : 0.23,
+            "32" : 0.20,
+            "33" : 0.18,
+            "34" : 0.16,
+            "35" : 0.14,
+            "36" : 0.13,
+            "37" : 0.11,
+            "38" : 0.10,
+            "39" : 0.09,
+            "40" : 0.08,
+        };
+
+    var wireGauge = data["wireGauge"];
+
+    if (wireGauge is undefined || wireGauge == "")
+        wireGauge = 0;
+    else if (wireGauge is number)
+        wireGauge = wireGaugeList[toString(wireGauge)] / gaugeFactor;
+    else if (wireGauge is string)
+        wireGauge = wireGaugeList[toString(trim(wireGauge, "\""))] / gaugeFactor;
+
+    var outerDiameter = 0;
+    var coreDiameter = 0;
+    const wireDiameter = (data["wireDiameter"] is number) ? data["wireDiameter"] : 0;
+    const wireArea = (data["wireArea"] is number) ? sqrt(data["wireArea"] / PI) * 2 : 0;
+    const wireInsulation = (data["wireInsulation"] is number) ? data["wireInsulation"] : 0;
+    const wireType = wireGauge != 0 ? "wireGauge" : (wireArea != 0 ? "wireArea" : undefined);
+    const wireSize = wireGauge != 0 ? data["wireGauge"] : (wireArea != 0 ? data["wireArea"] : undefined);
+
+    if (wireDiameter > 0)
+    {
+        outerDiameter = wireDiameter;
+
+        if (wireGauge > 0 && wireGauge < outerDiameter)
+            coreDiameter = wireGauge;
+
+        else if (wireArea > 0 && wireArea < outerDiameter)
+            coreDiameter = wireArea;
+
+        else if (wireInsulation > 0 && wireInsulation < outerDiameter / 2)
+            coreDiameter = outerDiameter - 2 * wireInsulation;
+
+        else
+            coreDiameter = 0.65 * outerDiameter; // for approximate visual purposes only
+    }
+    else if (wireGauge > 0)
+    {
+        coreDiameter = wireGauge;
+        outerDiameter = coreDiameter;
+
+        if (wireInsulation > 0)
+            outerDiameter = coreDiameter + 2 * wireInsulation;
+    }
+    else if (wireArea > 0)
+    {
+        coreDiameter = wireArea;
+        outerDiameter = coreDiameter;
+
+        if (wireInsulation > 0)
+            outerDiameter = coreDiameter + 2 * wireInsulation;
+    }
+
+    return { "outerDiameter" : outerDiameter * wireLengthUnits,
+            "coreDiameter" : coreDiameter * wireLengthUnits,
+            (wireType) : wireSize };
+}
+
+function getHarnessData(context is Context, definition is map, wires is Query)
+{
+    var harness = {};
+
+    for (var wire in evaluateQuery(context, wires))
+    {
+        const wireData = getAttribute(context, {
+                    "entity" : wire,
+                    "name" : "wireSegment"
+                });
+
+        if (wireData != undefined && wireData.harness != undefined)
+        {
+            const parentId = wireData.harness.parentId;
+            harness[parentId] = harness[parentId] != undefined ? harness[parentId] : { "diameter" : wireData.harness.diameter };
+
+            var edges = harness[parentId].edges == undefined ? [] : harness[parentId].edges;
+            edges = append(edges, qCreatedBy(lastModifyingOperationId(context, wire), EntityType.EDGE));
+
+            if (edges != [])
+            {
+                harness[parentId].edges = edges;
+                harness[parentId].diameter = wireData.harness.diameter;
+                harness[parentId].parentId = lastModifyingOperationId(context, qCompositePartsContaining(qHasAttributeWithValueMatching("wireSegment", { "wireId" : parentId, })))[0];
+            }
+        }
+    }
+
+    return harness;
+}
+
+function getFirstHarnessId(context is Context, wires is map, wireId is string)
+{
+    if (wires[wireId] == undefined)
+    {
+        const cables = getData(context, "cables");
+
+        return resize(wires[cables[wireId].wireIds[0]].featureId, 1);
+    }
+    else
+    {
+        return resize(wires[wireId].featureId, 1);
+    }
+}
+
+function getHarnessWireId(context is Context, definition is map, harness is Query, wireId is string)
+{
+    var harnessWireIds = getAttribute(context, {
+            "entity" : harness,
+            "name" : "harnessWireIds"
+        });
+
+    if (harnessWireIds == undefined)
+        harnessWireIds = [];
+
+    var cableName;
+
+    if (definition.cable)
+        cableName = definition.cableName == "" ? wireId : definition.cableName;
+
+    harnessWireIds = append(harnessWireIds, { "wireId" : wireId, "cableName" : cableName });
+
+    setAttribute(context, {
+                "entities" : harness,
+                "name" : "harnessWireIds",
+                "attribute" : harnessWireIds
+            });
+
+    return harnessWireIds;
+}
+
+export function getData(context is Context, class is string) returns map
+{
+    const data = getAttribute(context, {
+                "entity" : qOrigin(EntityType.BODY),
+                "name" : class
+            });
+
+    return data == undefined ? {} : data;
+}
+
+export function setData(context is Context, input is array, class is string)
+{
+    var data = getData(context, class);
+    var order = data.order == undefined ? [] : data.order;
+
+    if (class == "harnesses")
+    {
+        order = append(order, input[0].harnessId[0]);
+
+        var wires = [];
+
+        for (var wire in input[0].wireIds)
+        {
+            const cable = getData(context, "cables")[wire];
+
+            if (cable != undefined)
+            {
+                for (var cableWire in cable.wireIds)
+                    wires = append(wires, { (cableWire) : { "harnessId" : input[0].harnessId[0] } });
+            }
+            else
+                wires = append(wires, { (wire) : { "harnessId" : input[0].harnessId[0] } });
+        }
+
+        if (wires != [])
+            setData(context, wires, "wires");
+    }
+    else if (class == "cables")
+    {
+        for (var item in input)
+        {
+            for (var key in keys(item))
+            {
+                var result = item[key];
+                data[key] = result;
+                var wires = [];
+
+                for (var wire in result.wireIds)
+                    wires = append(wires, { (wire) : { "cableId" : key } });
+
+                setData(context, wires, "wires");
+            }
+        }
+    }
+    else
+    {
+        for (var item in input)
+        {
+            for (var key in keys(item))
+            {
+                if (data[key] == undefined)
+                {
+                    data[key] = item[key];
+                    order = class == "refs" ? [] : append(order, key);
+                }
+                else
+                    data[key] = mergeMaps(data[key], item[key]);
+            }
+        }
+    }
+
+    setAttribute(context, {
+                "entities" : qOrigin(EntityType.BODY),
+                "name" : class,
+                "attribute" : order == [] ? data : mergeMaps(data, { "order" : order })
+            });
+}
+
+export function setProps(context is Context, entities is Query, partName is string)
+{
+    setProperty(context, {
+                "entities" : entities,
+                "propertyType" : PropertyType.NAME,
+                "value" : partName
+            });
+
+    setProperty(context, {
+                "entities" : entities,
+                "propertyType" : PropertyType.DESCRIPTION,
+                "value" : partName
+            });
+}
+
+
+
+export function getUnits(context is Context, definition is map)
+{
+    definition.wireLengthUnits = getGlobalVariable(context, "wireLengthUnits", millimeter);
+
+    if (tolerantEquals(definition.wireLengthUnits, millimeter))
+        definition.units = "mm";
+    else if (tolerantEquals(definition.wireLengthUnits, centimeter))
+        definition.units = "cm";
+    else if (tolerantEquals(definition.wireLengthUnits, meter))
+        definition.units = "m";
+    else if (tolerantEquals(definition.wireLengthUnits, inch))
+        definition.units = "in";
+    else if (tolerantEquals(definition.wireLengthUnits, foot))
+        definition.units = "ft";
+    else if (tolerantEquals(definition.wireLengthUnits, yard))
+        definition.units = "yd";
+
+    return definition;
+}
+
+export function updateWireAttributes(context is Context, wireSegments is Query, attributes is map)
+{
+    for (var wireSegment in evaluateQuery(context, wireSegments))
+    {
+        var wireAttributes = getAttribute(context, {
+                "entity" : wireSegment,
+                "name" : "wireSegment"
+            });
+
+        if (wireAttributes == undefined)
+            wireAttributes = {};
+
+        setAttribute(context, {
+                    "entities" : wireSegment,
+                    "name" : "wireSegment",
+                    "attribute" : mergeMaps(wireAttributes, attributes)
+                });
+    }
+}
+
+// geometry functions
+
+export function getClosest(entities is Query, point is Vector)
+{
+    return qWithinRadius(entities, point, TOLERANCE.booleanDefaultTolerance * meter);
+}
+
+export function removeEdge(context is Context, edges is array, edge is Query)
+{
+    var index = -1;
+
+    for (var i, item in edges)
+    {
+        if (areQueriesEquivalent(context, item, edge))
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (index != -1)
+        return removeElementAt(edges, index);
+
+    return edges;
+}
+
+export function getEdgeChains(context is Context, edges is array)
+{
+    var network = false;
+    var edgeChains = [];
+    const edgesCopy = edges;
+
+    while (size(edges) > 0)
+    {
+        var chain = [];
+
+        for (var edge in edges) // check for selected faces first
+            if (!isQueryEmpty(context, qEntityFilter(edge, EntityType.FACE)))
+            {
+                edgeChains = edgeChains->append(edge);
+                edges = removeEdge(context, edges, edge);
+            }
+
+        if (edges == [])
+            break;
+
+        // Get next start edge
+        for (var edge in edges)
+        {
+            const vertices = qAdjacent(edge, AdjacencyType.VERTEX, EntityType.VERTEX);
+            var connectedEdges = qNothing();
+
+            for (var vertex in evaluateQuery(context, vertices))
+                connectedEdges = qUnion(connectedEdges, getClosest(qUnion(edges), evVertexPoint(context, {
+                                        "vertex" : vertex
+                                    }))->qSubtraction(edge));
+
+            // edge has three or more neighbours making it a curve network
+            if (size(evaluateQuery(context, connectedEdges)) > 2)
+            {
+                network = true;
+                break;
+            }
+
+            // edge has one or zero neighbours making it a start edge
+            if (size(evaluateQuery(context, connectedEdges)) < 2)
+            {
+                chain = [edge]; // start of chain is now edge
+                edges = removeEdge(context, edges, edge);
+                break;
+            }
+        }
+
+        if (network || chain == []) // curve network
+        {
+            network = true;
+            break;
+        }
+
+        // Search remaining edges - a closed profile will fail but that's to be expected
+        for (var _ in edges)
+        {
+            const vertices = qAdjacent(last(chain), AdjacencyType.VERTEX, EntityType.VERTEX);
+
+            // edge has three or more neighbours making it a curve network
+            if (size(evaluateQuery(context, vertices)) > 2)
+            {
+                network = true;
+                break;
+            }
+
+            var nextEdge = qNothing(); // will only contain one edge
+
+            for (var vertex in evaluateQuery(context, vertices))
+                nextEdge = qUnion(nextEdge, getClosest(qUnion(edges), evVertexPoint(context, {
+                                        "vertex" : vertex
+                                    }))->qSubtraction(last(chain)));
+
+            if (isQueryEmpty(context, nextEdge))
+                break;
+
+            chain = chain->append(nextEdge);
+            edges = removeEdge(context, edges, nextEdge);
+        }
+
+        edgeChains = edgeChains->append(qUnion(chain));
+    }
+    if (network)
+        edgeChains = [qUnion(edgesCopy)];
+
+    return edgeChains;
+}
+
+export function copyWireBody(context is Context, id is Id, wire is Query, attributes is map)
+{
+    try silent
+    {
+        if (isQueryEmpty(context, qEntityFilter(wire, EntityType.BODY)))
+        {
+            opExtractWires(context, id, {
+                        "edges" : wire
+                    });
+        }
+        else
+        {
+            opPattern(context, id, {
+                        "entities" : wire,
+                        "transforms" : [identityTransform()],
+                        "instanceNames" : ["1"],
+                        "copyPropertiesAndAttributes" : false
+                    });
+        }
+
+        updateWireAttributes(context, qCreatedBy(id, EntityType.BODY), attributes);
+    }
+
+    return qCreatedBy(id, EntityType.EDGE);
+}
+
+function sweepCovering(context is Context, id is Id, definition is map, diameter is ValueWithUnits, color is string, wires is Query)
+{
+    const start = evEdgeTangentLine(context, {
+                "edge" : qNthElement(wires, 0),
+                "parameter" : 0
+            });
+
+    const sketchStart = newSketchOnPlane(context, id + "sketchCovering", {
+                "sketchPlane" : plane(start.origin, start.direction)
+            });
+
+    skCircle(sketchStart, "OD", {
+                "center" : vector(0, 0) * meter,
+                "radius" : diameter / 2
+            });
+
+    skSolve(sketchStart);
+
+    try silent
+    {
+        opSweep(context, id + "sweepCovering", {
+                    "profiles" : qSketchRegion(id + "sketchCovering", false),
+                    "path" : wires
+                });
+    }
+
+    opDeleteBodies(context, id + "deleteCovering", {
+                "entities" : qCreatedBy(id + "sketchCovering", EntityType.BODY)
+            });
+
+    setProperty(context, {
+                "entities" : qCreatedBy(id + "sweepCovering", EntityType.FACE),
+                "propertyType" : PropertyType.APPEARANCE,
+                "value" : getColor(color)
+            });
+
+    setAttribute(context, {
+                "entities" : qNonCapEntity(id + "sweepCovering", EntityType.FACE),
+                "name" : "diameter",
+                "attribute" : diameter
+            });
+
+    setAttribute(context, {
+                "entities" : qCreatedBy(id + "sweepCovering", EntityType.BODY),
+                "name" : "flatten",
+                "attribute" : true
+            });
+}
+
+function makeCovering(context is Context, id is Id, definition is map, harness is map)
+{
+    const wires = qUnion(harness.edges);
+    const diameter = definition.bundleOverride ? definition.bundleOverrideDiameter : harness.diameter;
+
+    sweepCovering(context, id, definition, diameter, definition.coveringColor, wires);
+
+    if (!definition.bundleOverride)
+        return;
+
+    var errors = false;
+
+    // for modifying bundle covers from previous features
+    for (var i, bundle in definition.bundleOverrides)
+    {
+        for (var j, covering in evaluateQuery(context, bundle.overrideCoverings))
+        {
+            const bundleDiameter = getAttribute(context, {
+                        "entity" : covering,
+                        "name" : "diameter"
+                    });
+
+            if (bundleDiameter == undefined)
+            {
+                errors = true;
+                continue;
+            }
+
+            const coveringId = id + "editCovering" + i + j;
+            const bundleCenterline = copyWireBody(context, coveringId + "centerline", qDependency(covering), {});
+
+            var sweepCenterline;
+            var parameters = [];
+
+            for (var end in [0, 1])
+            {
+                const point = evEdgeTangentLine(context, {
+                                "edge" : wires, // test different selection scenarios
+                                "parameter" : end
+                            }).origin;
+
+                const distance = evDistance(context, {
+                            "side0" : bundleCenterline,
+                            "side1" : point
+                        });
+
+                if (distance.distance < 1e-6 * meter)
+                    parameters = append(parameters, distance.sides[0].parameter);
+            }
+
+            var deleteEdges = [];
+
+            if (parameters != [] && tolerantWithinExclusive(parameters[0], 0, 1))
+            {
+                opSplitEdges(context, coveringId + "splitEdges", {
+                            "edges" : bundleCenterline,
+                            "parameters" : [parameters]
+                        });
+
+                for (var edge in evaluateQuery(context, bundleCenterline))
+                {
+                    for (var end in [0, 1])
+                    {
+                        const point = evEdgeTangentLine(context, {
+                                        "edge" : edge, // test different selection scenarios
+                                        "parameter" : end
+                                    }).origin;
+
+                        const distance = evDistance(context, {
+                                    "side0" : wires,
+                                    "side1" : point
+                                });
+
+                        if (distance.distance > 1e-6 * meter)
+                            deleteEdges = append(deleteEdges, edge);
+                    }
+                }
+            }
+
+            sweepCenterline = copyWireBody(context, coveringId + "sweepCenterline", qSubtraction(bundleCenterline, qUnion(deleteEdges)), {});
+
+            if (sweepCenterline != undefined && !isQueryEmpty(context, sweepCenterline))
+            {
+                sweepCovering(context, coveringId + "sweep", definition, bundle.overrideCoveringDiameter, bundle.overrideCoveringColor, sweepCenterline);
+
+                updateWireAttributes(context, qOwnerBody(sweepCenterline), { "covering" : true, "harness" : { "diameter" : bundle.overrideCoveringDiameter, "color" : bundle.overrideCoveringColor, "parentId" : definition.wires[0].id } });
+            }
+
+            opDeleteBodies(context, coveringId + "deleteBodies", {
+                        "entities" : bundleCenterline
+                    });
+        }
+    }
+
+    if (errors && !isEditing(definition))
+        errorInfo(context, id, "Selections include non-bundle geometry and will be ignored");
+}
+
+function makeHarness(context is Context, id is Id, definition is map, wires is map, refs is Query, wireName is string)
+{
+    var wireType = "Cable";
+    var harnessId = resize(id, 1);
+
+    if (!definition.cable)
+    {
+        id = append(id, wireName);
+        wireType = "Wire";
+    }
+
+    const currentWires = qCreatedBy(id, EntityType.BODY)->qFlattenedCompositeParts()->qBodyType(BodyType.WIRE)->qSketchFilter(SketchObject.NO);
+    var compositeWireBody = qCompositePartsContaining(currentWires);
+    const sharedRefs = qSubtraction(refs->qCompositePartsContaining(), refs)->qFlattenedCompositeParts()->qBodyType(BodyType.WIRE);
+
+    const refsExist = !isQueryEmpty(context, refs);
+    const sharedRefsExist = !isQueryEmpty(context, sharedRefs);
+
+    if (sharedRefsExist)
+        compositeWireBody = qCompositePartsContaining(sharedRefs);
+
+    if (definition.bundle)
+    {
+        const harnessOrder = getData(context, "harnesses").order;
+        var earliestHarness;
+
+        if (harnessOrder != undefined)
+            earliestHarness = size(harnessOrder);
+
+        const bundle = getHarnessData(context, definition, currentWires);
+
+        for (var key, harness in bundle)
+        {
+            if (harness.edges != [] && harness.diameter != undefined)
+            {
+                if (definition.show)
+                    makeCovering(context, id + key, definition, harness);
+
+                const parentId = [harness.parentId] as Id;
+                harnessId = parentId;
+
+                if (harnessOrder != undefined)
+                {
+                    const harnessIndex = argIn(harness.parentId, harnessOrder);
+
+                    if (harnessIndex != undefined)
+                    {
+                        if (harnessIndex < earliestHarness)
+                            earliestHarness = harnessIndex;
+
+                        harnessId = [harnessOrder[earliestHarness]] as Id;
+                    }
+                }
+
+                compositeWireBody = qCompositePartsContaining(qCreatedBy(harnessId, EntityType.BODY));
+
+                if (parentId != harnessId)
+                    refs = qUnion(refs, qCompositePartsContaining(qCreatedBy(parentId, EntityType.BODY)));
+            }
+        }
+    }
+
+    try silent // add connectors to wire
+    {
+        opModifyCompositePart(context, id + "harness", {
+                    "composite" : compositeWireBody,
+                    "toAdd" : qUnion(qCreatedBy(id, EntityType.BODY)->qSketchFilter(SketchObject.NO), refs)
+                });
+    }
+
+    const existingWires = getHarnessWireId(context, definition, compositeWireBody, wireName);
+
+    if (refsExist && sharedRefsExist || definition.bundle)
+        wireType = "Harness";
+
+    var wireNames = "";
+    var harnessWireIds = [];
+
+    for (var i, wire in existingWires)
+    {
+        var wireName;
+
+        if (i > 0)
+            wireNames ~= "/";
+
+        if (wire.cableName != undefined)
+            wireName = wire.cableName;
+        else
+            wireName = wire.wireId;
+
+        wireNames ~= wireName;
+
+        if (wireType == "Harness")
+        {
+            if (i == 0)
+                harnessId = getFirstHarnessId(context, wires, wireName);
+
+            harnessWireIds = append(harnessWireIds, wireName);
+        }
+    }
+
+    var harnessName = wireType ~ ": " ~ wireNames;
+
+    if (length(harnessName) > 256)
+    {
+        if (!isEditing(definition))
+            errorInfo(context, id, wireType ~ " name is too long and will be truncated. Try creating a cable and add a cable ID to group wire names.");
+
+        const truncated = resize(splitIntoCharacters(harnessName), 256);
+        harnessName = "";
+
+        for (var char in truncated)
+            harnessName ~= char;
+    }
+
+    setProps(context, compositeWireBody, harnessName);
+
+    return { "wireIds" : harnessWireIds, "harnessId" : harnessId };
+}
+
+export function isEditing(definition is map)
+{
+    var editing = false;
+
+    for (var wire in definition.wires)
+        if (wire.edit && wire.visible)
+            editing = true;
+
+    return editing;
+}
+
+export function makeWire(context is Context, id is Id, definition is map)
+{
+    var wireIds = getWireIds(context, definition).wires;
+
+    if (wireIds == [])
+        return;
+
+    var connectors = [];
+    var harnessIds = [];
+    var harnessId;
+    const wires = getData(context, "wires");
+    const isCable = definition.cable;
+    const cableName = isCable ? wires[wireIds[0]].cableId : "";
+    const cableDiameter = isCable ? wires[wireIds[0]].cable.diameter : undefined;
+    const cableBend = isCable ? wires[wireIds[0]].cableBend : undefined;
+    const cableBendError = isCable ? wires[wireIds[0]].cableBendError : undefined;
+    const wireBodies = qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.WIRE)->qSketchFilter(SketchObject.NO);
+    const solidBodies = qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.SOLID);
+
+    for (var wireId in wireIds)
+    {
+        var refs = [];
+        var strips = [];
+        const wire = wires[wireId];
+        const featureId = id + wireId;
+
+        if (wire == undefined || wire.featureId == undefined) // required for editing logic and frequent user ID changes
+            continue;
+
+        const wireStart = qHasAttributeWithValueMatching(qCreatedBy(wire.featureId), "wireSegment", {
+                        "section" : "start"
+                    })->qOwnedByBody(EntityType.EDGE);
+
+        const wireMiddle = qHasAttributeWithValueMatching(qCreatedBy(wire.featureId), "wireSegment", {
+                        "section" : "wire"
+                    })->qOwnedByBody(EntityType.EDGE);
+
+        const wireEnd = qHasAttributeWithValueMatching(qCreatedBy(wire.featureId), "wireSegment", {
+                        "section" : "end"
+                    })->qOwnedByBody(EntityType.EDGE);
+
+        const wirePath = qUnion([wireStart, wireMiddle, wireEnd]);
+        const wireSections = definition.cable ? [wireStart, wireEnd] : [wirePath];
+
+        for (var s, section in wireSections)
+        {
+            if (isQueryEmpty(context, section))
+                continue;
+
+            const sectionEnd = ["from", "to"][s];
+
+            if (definition.show)
+            {
+                try silent
+                {
+                    const wireSketch = newSketchOnPlane(context, featureId + ("sketch" ~ sectionEnd), {
+                                "sketchPlane" : plane(wire[sectionEnd].vector.origin, wire[sectionEnd].vector.direction)
+                            });
+
+                    skCircle(wireSketch, "OD", {
+                                "center" : vector(0, 0) * meter,
+                                "radius" : wire.diameter / 2
+                            });
+
+                    skSolve(wireSketch);
+
+                    opSweep(context, featureId + ("sweep" ~ sectionEnd), {
+                                "profiles" : qSketchRegion(featureId + ("sketch" ~ sectionEnd)),
+                                "path" : section
+                            });
+
+                    setProperty(context, {
+                                "entities" : qCreatedBy(featureId + ("sweep" ~ sectionEnd), EntityType.FACE),
+                                "propertyType" : PropertyType.APPEARANCE,
+                                "value" : getColor(wire.color)
+                            });
+
+                    setAttribute(context, {
+                                "entities" : qNonCapEntity(featureId + ("sweep" ~ sectionEnd), EntityType.FACE),
+                                "name" : "diameter",
+                                "attribute" : wire.diameter
+                            });
+
+                    setAttribute(context, {
+                                "entities" : qCreatedBy(featureId + ("sweep" ~ sectionEnd), EntityType.BODY),
+                                "name" : "flatten",
+                                "attribute" : true
+                            });
+
+                    if (wire.core <= wire.diameter) // add strip length copper core
+                    {
+                        const stripEnd = definition.cable ? [sectionEnd] : ["from", "to"];
+
+                        for (var end in stripEnd)
+                        {
+                            const endFace = definition.cable ?
+                                qCapEntity(featureId + ("sweep" ~ end), CapType.END, EntityType.FACE) :
+                                qCapEntity(featureId + ("sweepfrom"), end == "to" ? CapType.START : CapType.END, EntityType.FACE);
+
+                            if (wire[sectionEnd].strip > 0 * meter)
+                            {
+                                opExtrude(context, featureId + ("strip" ~ end), {
+                                            "entities" : endFace,
+                                            "direction" : evPlane(context, {
+                                                        "face" : endFace
+                                                    }).normal,
+                                            "endBound" : BoundingType.BLIND,
+                                            "endDepth" : wire[end].strip
+                                        });
+
+                                setProperty(context, {
+                                            "entities" : qCreatedBy(featureId + ("strip" ~ end), EntityType.FACE),
+                                            "propertyType" : PropertyType.APPEARANCE,
+                                            "value" : color(0.9, 0.5, 0.3) // copper
+                                        });
+
+                                strips = append(strips, qNonCapEntity(featureId + ("strip" ~ end), EntityType.FACE));
+                            }
+                        }
+                    } // end of strip length
+                }
+                catch
+                {
+                    errorWarning(context, id, "Unable to create all wire geometry. Check for possible minimum bend radius violation.");
+                }
+            } // end of show
+
+            const refEnd = definition.cable ? [sectionEnd] : ["from", "to"];
+
+            for (var end in refEnd)
+            {
+                if (wire[end].refId != false)
+                    for (var refId in wire[end].refId)
+                        refs = append(refs, qModifiableEntityFilter(qCreatedBy(refId, EntityType.BODY)));
+            }
+
+            connectors = append(connectors, (qUnion(refs)));
+
+        } // end of sections
+
+        if (!isQueryEmpty(context, qUnion(strips)))
+        {
+            opOffsetFace(context, featureId + "offset", { // strips offset here for performance
+                        "moveFaces" : qUnion(strips),
+                        "offsetDistance" : (wire.diameter - wire.core) / -2
+                    });
+        }
+
+        if (!definition.cable)
+        {
+            try silent
+            {
+                const compositeId = featureId + "composite";
+
+                // group all individual wire entities together
+                opCreateCompositePart(context, compositeId, {
+                            "bodies" : qOwnerBody(qUnion(wirePath, qCreatedBy(featureId, EntityType.BODY)->qBodyType(BodyType.SOLID))),
+                            "closed" : true
+                        });
+
+                try
+                {
+                    const harness = makeHarness(context, id, definition, wires, qUnion(refs), wireId);
+                    harnessIds = harness.wireIds;
+                    harnessId = harness.harnessId;
+                }
+                catch
+                {
+                    errorWarning(context, id, "Bundle thickness too large for route radius.");
+                }
+            }
+        }
+    } // end of wire loop
+
+    if (definition.cable)
+    {
+        var refs = [];
+        const wire = wires[definition.wires[0].id];
+
+        if (definition.show)
+        {
+            try silent
+            {
+                const cableSegments = qHasAttributeWithValueMatching(wireBodies, "wireSegment", {
+                                "section" : "cable"
+                            })->qOwnedByBody(EntityType.EDGE);
+
+                const cablePath = constructPath(context, cableSegments);
+
+                const cableStart = evPathTangentLines(context, cablePath, [0]).tangentLines[0];
+
+                const cableSketch = newSketchOnPlane(context, id + "cableSketch", {
+                            "sketchPlane" : plane(cableStart.origin, cableStart.direction)
+                        });
+
+                skCircle(cableSketch, "OD", {
+                            "center" : vector(0, 0) * meter,
+                            "radius" : wire.cable.diameter / 2
+                        });
+
+                skSolve(cableSketch);
+
+                opSweep(context, id + "cableSweep", {
+                            "profiles" : qSketchRegion(id + "cableSketch"),
+                            "path" : qUnion(cablePath.edges)
+                        });
+
+                setProperty(context, {
+                            "entities" : qCreatedBy(id + "cableSweep", EntityType.FACE),
+                            "propertyType" : PropertyType.APPEARANCE,
+                            "value" : getColor(wire.cable.color)
+                        });
+
+                setAttribute(context, {
+                            "entities" : qNonCapEntity(id + "cableSweep", EntityType.FACE),
+                            "name" : "diameter",
+                            "attribute" : wire.cable.diameter
+                        });
+
+                setAttribute(context, {
+                            "entities" : qCreatedBy(id + "cableSweep", EntityType.BODY),
+                            "name" : "flatten",
+                            "attribute" : true
+                        });
+            }
+            catch
+            {
+                errorWarning(context, id, "Unable to create cable geometry. Check for possible minimum bend radius violation.");
+            }
+        } // end of show cable
+
+        if (wire.from.refId != false)
+            for (var refId in wire.from.refId)
+                refs = append(refs, qCreatedBy(refId, EntityType.BODY));
+
+        if (wire.to.refId != false)
+            for (var refId in wire.to.refId)
+                refs = append(refs, qCreatedBy(refId, EntityType.BODY));
+
+        connectors = append(connectors, qModifiableEntityFilter(qUnion(refs)));
+
+        try silent
+        {
+            const compositeId = id + "composite";
+
+            // group all wire features together to make a cable
+            opCreateCompositePart(context, compositeId, {
+                        "bodies" : qUnion(wireBodies, solidBodies),
+                        "closed" : true
+                    });
+
+            const harness = makeHarness(context, id, definition, wires, qUnion(connectors), cableName);
+
+            setData(context, [{ (cableName) : { "wireIds" : wireIds, "diameter" : cableDiameter, "color" : definition.cableColor, "bend" : cableBend, "error" : cableBendError } }], "cables");
+
+            harnessIds = harness.wireIds;
+            harnessId = harness.harnessId;
+        }
+        catch
+        {
+            errorWarning(context, id, "Unable to create composite cable.");
+        }
+    }
+
+    if (definition.show)
+        opDeleteBodies(context, id + "deleteSketch", {
+                    "entities" : qSketchFilter(qCreatedBy(id, EntityType.BODY), SketchObject.YES)
+                });
+
+    if (harnessIds != [])
+        setData(context, [{ "wireIds" : harnessIds, "harnessId" : harnessId }], "harnesses");
+}
+
+export function getWireTags(wireData is map, wireId is string, override is map)
+{
+    return mergeMaps(
+        {
+                "wireId" : wireId,
+                "section" : "wire",
+                "bend" : wireData[wireId].bend,
+                "color" : wireData[wireId].color,
+                "diameter" : wireData[wireId].diameter,
+                "gauge" : wireData[wireId].gauge,
+                "area" : wireData[wireId].area,
+                "from" : {
+                    "ref" : wireData[wireId].from.ref,
+                    "pin" : wireData[wireId].from.pin,
+                    "strip" : wireData[wireId].from.strip,
+                    "stub" : wireData[wireId].from.stub,
+                    "splice" : wireData[wireId].from.splice
+                },
+                "to" : {
+                    "ref" : wireData[wireId].to.ref,
+                    "pin" : wireData[wireId].to.pin,
+                    "strip" : wireData[wireId].to.strip,
+                    "stub" : wireData[wireId].to.stub,
+                    "splice" : wireData[wireId].to.splice
+                }
+            }, override);
+}
+
+export function getWireIds(context is Context, definition is map)
+{
+    var cableName = "";
+    var wires = [];
+
+    for (var i, wire in definition.wires)
+    {
+        if (wire.feedback != " " && wire.feedback != "(manual)") // wire has error
+            continue;
+
+        wires = append(wires, wire.id);
+
+        if (definition.cable && definition.cableName == "")
+        {
+            if (i > 0)
+                cableName ~= "/";
+
+            cableName ~= wire.id;
+        }
+    }
+
+    if (definition.cable && definition.cableName != "")
+        cableName = definition.cableName;
+
+    return { "cable" : cableName == "" ? undefined : cableName, "wires" : wires };
+}
+
+export function upgradeStrip(definition is map)
+{
+    if (definition.version >= V_195)
+        return definition;
+
+    if (definition.stripTo == StripTo.DEPRECATED)
+        return definition;
+
+    if (definition.stripTo == StripTo.NONE)
+    {
+        definition.stripFirst = StripFirst.STRIP;
+        definition.stripSecond = StripSecond.STRIP;
+    }
+    else if (definition.stripTo == StripTo.CABLE)
+    {
+        definition.stripFirst = StripFirst.CABLE;
+        definition.stripSecond = StripSecond.CABLE;
+    }
+    else if (definition.stripTo == StripTo.CABLE_FIRST)
+    {
+        definition.stripFirst = StripFirst.STRIP;
+        definition.stripSecond = StripSecond.CABLE;
+    }
+    else if (definition.stripTo == StripTo.CABLE_LAST)
+    {
+        definition.stripFirst = StripFirst.CABLE;
+        definition.stripSecond = StripSecond.STRIP;
+    }
+    else if (definition.stripTo == StripTo.FIRST)
+    {
+        definition.stripFirst = StripFirst.CLIP;
+        definition.stripSecond = StripSecond.STRIP;
+    }
+    else if (definition.stripTo == StripTo.LAST)
+    {
+        definition.stripFirst = StripFirst.STRIP;
+        definition.stripSecond = StripSecond.CLIP;
+    }
+    else if (definition.stripTo == StripTo.BOTH)
+    {
+        definition.stripFirst = StripFirst.CLIP;
+        definition.stripSecond = StripSecond.CLIP;
+    }
+
+    return definition;
+}
+
+export function upgrade(version is number, input is map)
+{
+    if (version >= V_195)
+        return input;
+
+    var output = {};
+
+    for (var key in keys(input))
+    {
+        const splitKey = match(key, "(w\\d*)?(c\\d*[se]?)(.*)").captures;
+
+        if (splitKey[1] == "" || input[splitKey[2]] == undefined)
+            output[splitKey[2]] = input[key];
+    }
+
+    return output;
+}
+
+export function upgradeBundles(definition is map)
+{
+    if (definition.version >= V_204)
+        return definition;
+
+    // upgrade pre-178 offsets
+    for (var key in keys(definition.bundleOffset))
+    {
+        const splitKey = match(key, "w(\\d*)(c\\d*)(b\\d*)(.*)").captures;
+
+        const index = stringToNumber(splitKey[1]);
+
+        if (index >= size(definition.wires))
+        {
+            definition.bundleOffset[key] = undefined;
+            continue;
+        }
+
+        if (definition.wires[index].bundleOffsets[splitKey[3]] == undefined)
+        {
+            definition.wires[stringToNumber(splitKey[1])].bundleOffsets[splitKey[3]] = definition.bundleOffset[key];
+            definition.bundleOffset[key] = undefined;
+        }
+    }
+
+    // upgrade pre-204 offsets
+    for (var i, wire in definition.wires)
+    {
+        if (wire.bundleOffsets.b0 != undefined)
+        {
+            definition.wires[i].bundleOffsets["c" ~ i ~ "bs"] = wire.bundleOffsets.b0;
+            definition.wires[i].bundleOffsets.b0 = undefined;
+            definition.wires[i].bundleOffsets["c" ~ i ~ "be"] = wire.bundleOffsets.b1;
+            definition.wires[i].bundleOffsets.b1 = undefined;
+        }
+    }
+
+    return definition;
+}
+
