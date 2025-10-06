@@ -1,0 +1,730 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "90442c40b60ae694e2729d1f", version : "a2a975479b6a7c456d7b15d7");
+icon::import(path : "1029a5a0124badb179b67830", version : "96b7ae29fa56bffd93f2ac70");
+
+export enum ClipAction
+{
+    annotation { "Name" : "Insert" }
+    INSERT,
+    annotation { "Name" : "Define" }
+    DEFINE
+}
+
+annotation { "Feature Type Name" : "Wire clip", "Icon" : icon::BLOB_DATA,
+        "Feature Type Description" : "Define clips, channels, holes or waypoints for routing",
+        "Manipulator Change Function" : "clipAxis",
+        "Editing Logic Function" : "clipEditingLogic" }
+export const wireClip = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Version", "Default" : "204.1", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.version);
+
+        annotation { "Name" : "Next ID", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isInteger(definition.nextID, { (unitless) : [-1, -1, 999] } as IntegerBoundSpec);
+
+        annotation { "Name" : "Action", "UIHint" : [UIHint.HORIZONTAL_ENUM, UIHint.REMEMBER_PREVIOUS_VALUE] }
+        definition.action is ClipAction;
+
+        if (definition.action == ClipAction.INSERT)
+        {
+            annotation { "Name" : "Clip part", "Filter" : PartStudioItemType.COMPOSITE_PART, "MaxNumberOfPicks" : 1 }
+            definition.partStudio is PartStudioData;
+
+            annotation { "Name" : "Locations", "Item name" : "Locations", "UIHint" : [UIHint.PREVENT_ARRAY_REORDER, UIHint.FOCUS_INNER_QUERY], "Description" : "- Removes all manual clip location edits<br>- Use undo/redo to change individual location edits" }
+            definition.insertedClips is array;
+
+            for (var clip in definition.insertedClips)
+            {
+                annotation { "Name" : "Clip ID", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(clip.insertedClipID, { (unitless) : [0, 0, 999] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Copy", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                clip.linkVisible is boolean;
+
+                if (clip.linkVisible)
+                {
+                    annotation { "Name" : "Link to previous", "Default" : false }
+                    clip.link is boolean;
+                }
+
+                if (!clip.link)
+                {
+                    annotation { "Name" : "Location", "Filter" : BodyType.MATE_CONNECTOR || QueryFilterCompound.ALLOWS_DIRECTION, "MaxNumberOfPicks" : 1 }
+                    clip.location is Query;
+
+                    annotation { "Name" : "Orientation", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                    clip.orientation is Query;
+
+                    annotation { "Name" : "Flip direction", "UIHint" : [UIHint.PRIMARY_AXIS, UIHint.FIRST_IN_ROW] }
+                    clip.flip is boolean;
+
+                    annotation { "Name" : "Rotate", "UIHint" : UIHint.MATE_CONNECTOR_AXIS_TYPE }
+                    clip.rotate is MateConnectorAxisType;
+                }
+
+                annotation { "Name" : "Drag", "Default" : false }
+                clip.drag is boolean;
+
+                annotation { "Name" : "Reset clip", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR, "Default" : true, "Description" : "- Removes all manual clip location edits<br>- Use undo/redo to change individual location edits" }
+                clip.resetEdits is boolean;
+
+                annotation { "Name" : "Vertical offset", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM, "Description" : "- Move clip axis away from the clip insert point<br>- Use this option to remove interference" }
+                isLength(clip.offset, { (millimeter) : [-500, 0, 500] } as LengthBoundSpec);
+
+                annotation { "Name" : "X", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isLength(clip.x, { (millimeter) : [-1e6, 0, 1e6] } as LengthBoundSpec);
+
+                annotation { "Name" : "Y", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isLength(clip.y, { (millimeter) : [-1e6, 0, 1e6] } as LengthBoundSpec);
+
+                annotation { "Name" : "A", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAngle(clip.a, { (degree) : [-360, 0, 360] } as AngleBoundSpec);
+
+                annotation { "Name" : "Transform", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(clip.transform);
+            }
+        }
+        else
+        {
+            annotation { "Name" : "Clips/Channels", "Item name" : "Clip/Channel", "Item label template" : "#clipName", "UIHint" : UIHint.PREVENT_ARRAY_REORDER }
+            definition.clips is array;
+
+            for (var clip in definition.clips)
+            {
+                annotation { "Name" : "Show", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                clip.visible is boolean;
+
+                annotation { "Name" : "Show", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                clip.showOffset is boolean;
+
+                annotation { "Name" : "Clip ID", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(clip.clipID, { (unitless) : [0, 0, 999] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Clip axis or channel path", "Filter" : (EntityType.EDGE || QueryFilterCompound.ALLOWS_AXIS) && ConstructionObject.NO,
+                            "Description" : "- Select a line, circle, cylinder, cone or mate connector<br>- Select a tangent continuous set of edges to define a channel path<br>- Tangent continuous edges can be converted to a single curve<br>- Implicit mate connectors cannot be added to in-context geometry" }
+                clip.axis is Query;
+
+                annotation { "Name" : "Parts (optional)", "Filter" : EntityType.BODY && (BodyType.SOLID || BodyType.COMPOSITE), "Description" : "- Select one or more parts to define the clip center<br>- Select one or more parts to create a composite library part" }
+                clip.part is Query;
+
+                if (clip.visible)
+                {
+                    annotation { "Name" : "Clip mate connector", "MaxNumberOfPicks" : 1, "Filter" : BodyType.MATE_CONNECTOR,
+                                "Description" : "- Select a location point for clip mate connector<br>- Z axis defines vertical offset direction" }
+                    clip.mateConnector is Query;
+
+                    annotation { "Name" : "Use part center", "Description" : "- Center the axis in the middle of the selected part(s)" }
+                    clip.center is boolean;
+                }
+
+                annotation { "Name" : "Name", "Description" : "- Set the axis, channel or library part name (optional)", "Default" : "Clip" }
+                clip.clipName is string;
+
+                if (clip.visible)
+                {
+                    annotation { "Name" : "Part number" }
+                    clip.partNumber is string;
+
+                    annotation { "Name" : "Description" }
+                    clip.description is string;
+
+                    annotation { "Name" : "Total mass (g)",
+                                "Description" : "- Total mass in grams for all clip parts" }
+                    isReal(clip.totalMass, { (unitless) : [0, 0, 1000] } as RealBoundSpec);
+                }
+
+                annotation { "Name" : "Offset 1", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM, "Description" : "- Extends the clip axis" }
+                isLength(clip.startOffset, { (millimeter) : [0, 5, 500] } as LengthBoundSpec);
+
+                annotation { "Name" : "Offset 2", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM, "Description" : "- Extends the clip axis" }
+                isLength(clip.endOffset, { (millimeter) : [0, 5, 500] } as LengthBoundSpec);
+
+                if (clip.visible)
+                {
+                    annotation { "Name" : "Vertical offset", "UIHint" : UIHint.MATCH_LAST_ARRAY_ITEM, "Description" : "- Move clip axis away from the clip mate connector" }
+                    isLength(clip.vertical, { (millimeter) : [-500, 0, 500] } as LengthBoundSpec);
+                }
+            }
+        }
+    }
+    {
+        defineClip(context, id, definition);
+
+        if (size(definition.partStudio) > 0 && size(definition.insertedClips) > 0 && definition.partStudio.partQuery.subqueries != [])
+        {
+            var clips = [];
+            var transforms = [];
+            const instantiator = newInstantiator(id);
+            const otherContext = @convert(definition.partStudio.buildFunction(), undefined);
+            const mateConnectors = qMateConnectorsOfParts(qFlattenedCompositeParts(definition.partStudio.partQuery));
+
+            for (var index, clip in definition.insertedClips)
+                if (!isQueryEmpty(context, clip.location))
+                    transforms = append(transforms, insertClip(context, id, definition, clip, index));
+
+            for (var index, transform in transforms)
+            {
+                var idName = definition.nextID == -1 ? index : definition.insertedClips[index].insertedClipID;
+
+                clips = append(clips, addInstance(instantiator, definition.partStudio, {
+                                "transform" : transform,
+                                "mateConnector" : isQueryEmpty(otherContext, mateConnectors) ? undefined : mateConnectors,
+                                "name" : "Auto" ~ idName
+                            }));
+            }
+
+            if (size(clips) > 0)
+            {
+                instantiate(context, instantiator);
+
+                for (var i, clip in clips)
+                {
+                    var cSys = transforms[i] * WORLD_COORD_SYSTEM;
+
+                    opTransform(context, id + "offset" + i, {
+                                "bodies" : clip->qBodyType(BodyType.WIRE),
+                                "transform" : transform(definition.insertedClips[i].offset * cSys.zAxis)
+                            });
+                }
+            }
+        }
+    });
+
+function insertClip(context is Context, id is Id, definition is map, clip is map, index is number)
+{
+    if (isQueryEmpty(context, clip.location))
+        return;
+
+    var manipulators = {};
+    var origin;
+    var cSys;
+    var zAxis = extractDirection(context, clip.location);
+    var xAxis = perpendicularVector(zAxis);
+    var angle = clip.a;
+
+    zAxis *= clip.flip ? -1 : 1;
+
+    if (!isQueryEmpty(context, clip.orientation))
+    {
+        var uAxis = extractDirection(context, clip.orientation);
+
+        if (parallelVectors(uAxis, zAxis))
+            uAxis = perpendicularVector(zAxis);
+        else
+        {
+            uAxis -= dot(uAxis, zAxis) / dot(zAxis, zAxis) * zAxis;
+            uAxis = normalize(uAxis);
+        }
+
+        angle = angleBetween(xAxis, uAxis);
+    }
+
+    if (clip.rotate == MateConnectorAxisType.PLUS_Y)
+        xAxis = cross(zAxis, xAxis);
+    else if (clip.rotate == MateConnectorAxisType.MINUS_X)
+        xAxis = -xAxis;
+    else if (clip.rotate == MateConnectorAxisType.MINUS_Y)
+        xAxis = -cross(zAxis, xAxis);
+
+    const yAxis = cross(zAxis, xAxis);
+
+    try silent
+    {
+        origin = evAxis(context, {
+                        "axis" : clip.location
+                    }).origin;
+    }
+    catch
+    {
+        origin = evFaceTangentPlane(context, {
+                        "face" : clip.location,
+                        "parameter" : vector(0.5, 0.5)
+                    }).origin;
+    }
+
+    try silent
+    {
+        cSys = coordSystem(origin, xAxis, zAxis);
+    }
+    catch
+    {
+        throw regenError("Axes of direction and orientation cannot be parallel", ["direction", "orientation"]);
+    }
+
+    var triadTransform = clip.transform == undefined || clip.transform == {} ? identityTransform() : transform(matrix(clip.transform.linear), vector(clip.transform.translation));
+
+    // convert offsets to transform one time only
+    if (definition.version <= V_204 && triadTransform == identityTransform())
+    {
+        origin += xAxis * clip.x;
+        origin += yAxis * clip.y;
+        xAxis = rotationMatrix3d(zAxis, angle) * xAxis;
+        triadTransform.translation = fromWorld(cSys, origin);
+        triadTransform.linear = (rotationAround(Z_AXIS, angle).linear);
+    }
+
+    if (clip.link)
+    {
+        println(index);
+        println(definition.insertedClips[0].transform);
+        var previousTransform = identityTransform();
+
+        for (var k = index - 1;; k -= 1)
+        {
+            previousTransform = transform(matrix(definition.insertedClips[k].transform.linear),
+                    vector(definition.insertedClips[k].transform.translation)) * previousTransform;
+
+            if (!definition.insertedClips[k].link)
+                break;
+        }
+
+        triadTransform = previousTransform * triadTransform;
+    }
+
+    if (clip.drag != undefined && clip.drag)
+        manipulators["f0-" ~ index] = fullTriadManipulator({
+                    "base" : cSys,
+                    "transform" : triadTransform,
+                    "displayEditView" : true
+                });
+
+    addManipulators(context, id, manipulators);
+
+    return toWorld(cSys) * triadTransform;
+}
+
+function defineClip(context is Context, id is Id, definition is map)
+{
+    for (var index, clip in definition.clips)
+    {
+        if (isQueryEmpty(context, clip.axis))
+            continue;
+
+        var manipulators = {};
+        var clipId = definition.nextID == -1 ? id + "clip" + index : id + "clip" + clip.clipID;
+        var startPoint;
+        var endPoint;
+        var startDirection;
+        var endDirection;
+        var firstStartPoint;
+        var firstEndPoint;
+        var firstStartDirection;
+        var firstEndDirection;
+        var tangent = true;
+        var network = false;
+
+        var edgeChains = getEdgeChains(context, evaluateQuery(context, clip.axis));
+
+        for (var i, edgeChain in edgeChains)
+        {
+            var clipIndex = definition.version >= V_195 ? clipId + i : clipId;
+
+            try silent
+            {
+                var axis = evAxis(context, { // throws if no axis or more than one entity selected
+                        "axis" : edgeChain
+                    });
+
+                startDirection = axis.direction;
+                endDirection = -startDirection;
+
+                const cSys = coordSystem(axis.origin, perpendicularVector(startDirection), startDirection);
+
+                const axisBox = evBox3d(context, {
+                            "topology" : edgeChain,
+                            "cSys" : cSys
+                        });
+
+                if (clip.center && !isQueryEmpty(context, clip.part))
+                {
+                    const partBox = evBox3d(context, {
+                                "topology" : clip.part,
+                                "cSys" : cSys
+                            });
+
+                    var boxAxis = line(box3dCenter(partBox), startDirection);
+                    boxAxis.origin = toWorld(cSys, boxAxis.origin);
+                    axis.origin = project(boxAxis, axis.origin);
+                }
+
+                var startOffset = axisBox.maxCorner[2];
+                var endOffset = abs(axisBox.minCorner[2]);
+
+                if (tolerantEqualsZero(startOffset + endOffset + clip.startOffset + clip.endOffset))
+                {
+                    startOffset = 1e-6 * meter;
+                    endOffset = 1e-6 * meter;
+                    errorWarning(context, id, "Axis has zero length and will not be selectable during routing.");
+                }
+
+                startPoint = axis.origin + startDirection * startOffset;
+                endPoint = axis.origin + endDirection * endOffset;
+
+                opFitSpline(context, clipIndex, {
+                            "points" : [
+                                startPoint + startDirection * clip.startOffset,
+                                endPoint + endDirection * clip.endOffset
+                            ]
+                        });
+            }
+            catch
+            {
+                try silent
+                {
+                    const path = constructPath(context, edgeChain);
+
+                    if (path.closed)
+                        throw "";
+
+                    const endPoints = evPathTangentLines(context, path, [0, 1]);
+                    startPoint = endPoints.tangentLines[0].origin;
+                    endPoint = endPoints.tangentLines[1].origin;
+                    startDirection = -endPoints.tangentLines[0].direction;
+                    endDirection = endPoints.tangentLines[1].direction;
+
+                    if (clip.startOffset > 0 * meter)
+                        opFitSpline(context, clipIndex + "extend" + "start", {
+                                    "points" : [
+                                        startPoint,
+                                        startPoint + startDirection * clip.startOffset
+                                    ]
+                                });
+
+                    if (clip.endOffset > 0 * meter)
+                        opFitSpline(context, clipIndex + "extend" + "end", {
+                                    "points" : [
+                                        endPoint,
+                                        endPoint + endDirection * clip.endOffset
+                                    ]
+                                });
+
+                    opSplineThroughEdges(context, clipIndex + "clipWires", {
+                                "edges" : qUnion(qUnion(path.edges), qCreatedBy(clipIndex + "extend", EntityType.EDGE))
+                            });
+
+                    if (clip.startOffset + clip.endOffset > 0 * meter)
+                        opDeleteBodies(context, clipIndex + "deleteBodies", {
+                                    "entities" : qCreatedBy(clipIndex + "extend")
+                                });
+                }
+                catch (error)
+                {
+                    if (size(evaluateQuery(context, qCreatedBy(id, EntityType.BODY))) > 0)
+                        opDeleteBodies(context, clipId + "deleteEverything", {
+                                    "entities" : qCreatedBy(id, EntityType.BODY)
+                                });
+
+                    if (error is string)
+                        network = true;
+                    else
+                        tangent = false;
+
+                    break;
+                }
+            }
+
+            if (startPoint != undefined)
+            {
+                firstStartPoint = startPoint;
+                firstEndPoint = endPoint;
+                firstStartDirection = startDirection;
+                firstEndDirection = endDirection;
+            }
+        }
+
+        if (!tangent || network)
+        {
+            if (!tangent)
+            {
+                reportFeatureWarning(context, id, "Selected edges must be tangent.");
+                return;
+            }
+            else
+            {
+                for (var j, edge in evaluateQuery(context, clip.axis)) // copy all edge selections
+                    if (!isQueryEmpty(context, qEntityFilter(edge, EntityType.EDGE)))
+                        opExtractWires(context, clipId + "clipWires" + j, {
+                                    "edges" : edge
+                                });
+
+                reportFeatureInfo(context, id, "Selected edges must be open and contiguous. Creating Clip network with no offsets.");
+            }
+        }
+
+        try silent
+        {
+            if (size(evaluateQuery(context, qCreatedBy(clipId, EntityType.BODY))) > 0)
+            {
+                setProperty(context, {
+                            "entities" : qCreatedBy(clipId, EntityType.BODY),
+                            "propertyType" : PropertyType.NAME,
+                            "value" : clip.clipName == "" ? "Clip axis" : clip.clipName
+                        });
+
+                if (!isQueryEmpty(context, clip.part)) // part selected likely for library part creation
+                {
+                    const inContext = isQueryEmpty(context, clip.part->qModifiableEntityFilter());
+
+                    if (!inContext)
+                    {
+                        opCreateCompositePart(context, clipId + "compositeClip", {
+                                    "bodies" : qUnion(qCreatedBy(clipId, EntityType.BODY), clip.part),
+                                    "closed" : true
+                                });
+
+                        setProps(context, qCreatedBy(clipId + "compositeClip", EntityType.BODY), clip.clipName);
+                    }
+
+                    if (!isQueryEmpty(context, clip.mateConnector))
+                    {
+                        const offsetVector = evMateConnector(context, {
+                                    "mateConnector" : clip.mateConnector
+                                });
+
+                        opMateConnector(context, clipId + "mateConnector", {
+                                    "coordSystem" : offsetVector,
+                                    "owner" : clip.part
+                                });
+
+                        var zAxis = offsetVector.zAxis;
+
+                        if (!network && !parallelVectors(zAxis, startDirection))
+                            zAxis -= dot(zAxis, startDirection) * startDirection;
+
+                        opTransform(context, clipId + "transform", {
+                                    "bodies" : qCreatedBy(clipId, EntityType.BODY)->qBodyType(BodyType.WIRE),
+                                    "transform" : transform(zAxis * clip.vertical)
+                                });
+
+                        if (!network)
+                        {
+                            firstStartPoint = transform(zAxis * clip.vertical) * firstStartPoint;
+                            firstEndPoint = transform(zAxis * clip.vertical) * firstEndPoint;
+                        }
+                    }
+                }
+
+                if (!network)
+                {
+                    manipulators["c0-" ~ index] = linearManipulator({
+                                "base" : firstStartPoint,
+                                "direction" : firstStartDirection,
+                                "offset" : clip.startOffset,
+                                "minValue" : 0 * meter
+                            });
+
+                    manipulators["c1-" ~ index] = linearManipulator({
+                                "base" : firstEndPoint,
+                                "direction" : firstEndDirection,
+                                "offset" : clip.endOffset,
+                                "minValue" : 0 * meter
+                            });
+                }
+            }
+        }
+        catch (e)
+        {
+            var errorString = "Unable to make a library part from these selections";
+
+            if (e is map && e.message == "COMPOSITE_NON_MODIFIABLE")
+                errorString = "Cannot make a library part from in-context geometry";
+
+            errorWarning(context, id, errorString);
+
+            return;
+        }
+
+        try silent
+        {
+            addDebugEntities(context, qCreatedBy(id, EntityType.BODY), DebugColor.CYAN);
+        }
+
+        addManipulators(context, id, manipulators);
+
+    } // end for loop
+}
+
+export function clipAxis(context is Context, definition is map, newManipulators is map) returns map
+{
+    const key = keys(newManipulators)[0];
+    const splitKey = match(key, "([icfr])(\\d*)-(\\d*)").captures;
+    const clipType = splitKey[1];
+    const dragIndex = stringToNumber(splitKey[2]);
+    const clipIndex = stringToNumber(splitKey[3]);
+
+    if (clipType == "c") // defined clip
+        definition.clips[clipIndex][dragIndex == 0 ? "startOffset" : "endOffset"] = newManipulators[key].offset;
+    else if (clipType == "i") // inserted clip
+        definition.insertedClips[clipIndex][dragIndex == 0 ? "x" : "y"] = newManipulators[key].offset;
+    else if (clipType == "r") // rotated clip
+        definition.insertedClips[clipIndex].a = newManipulators[key].angle;
+    else if (clipType == "f") // full triad
+    {
+        const triadTransform = newManipulators[key].transform;
+        var tform = transform(transpose(triadTransform.linear), triadTransform.translation);
+
+        if (definition.insertedClips[clipIndex].link)
+        {
+            var previousTransform = identityTransform();
+
+            for (var j = clipIndex - 1;; j -= 1)
+            {
+                previousTransform = previousTransform * inverse(transform(matrix(definition.insertedClips[j].transform.linear),
+                            vector(definition.insertedClips[j].transform.translation)));
+
+                if (!definition.insertedClips[j].link)
+                    break;
+            }
+
+            tform = previousTransform * tform;
+        }
+
+        definition.insertedClips[clipIndex].transform.linear = tform.linear;
+        definition.insertedClips[clipIndex].transform.translation = tform.translation;
+    }
+
+    return definition;
+}
+
+function clipChanged(oldDefinition is map, definition is map)
+{
+    const clipSize = size(definition.insertedClips);
+
+    // New feature or user removed ref
+    if (clipSize == 0 || size(oldDefinition.insertedClips) > clipSize)
+        return { "clipSize" : clipSize };
+
+    // User added new clip
+    if (size(oldDefinition.insertedClips) < clipSize)
+        return { "clipIndex" : clipSize - 1, "clipSize" : clipSize, "clipNew" : true };
+
+    for (var clipIndex, clipArray in definition.insertedClips)
+        for (var clipKey, clipValue in clipArray)
+            if (clipValue != oldDefinition.insertedClips[clipIndex][clipKey])
+                return { "clipIndex" : clipIndex, "clipKey" : clipKey, "clipValue" : clipValue, "clipSize" : clipSize };
+
+    return {};
+}
+
+export function clipEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    const clips = size(definition.clips);
+    const insertedClips = size(definition.insertedClips);
+
+    for (var i = 0; i < insertedClips; i += 1)
+    {
+        if (definition.insertedClips[i].transform == {})
+            definition.insertedClips[i].transform = identityTransform();
+    }
+
+    if (definition.nextID == -1) // from version 198 onwards
+    {
+        definition.nextID = 0;
+
+        for (var i = 0; i < insertedClips; i += 1)
+        {
+            definition.insertedClips[i].insertedClipID = definition.nextID;
+            definition.nextID += 1;
+        }
+
+        for (var i = 0; i < clips; i += 1)
+        {
+            definition.clips[i].clipID = definition.nextID;
+            definition.nextID += 1;
+        }
+    }
+
+    if (oldDefinition == {})
+        return definition;
+
+    if (clips > size(oldDefinition.clips)) // new clip defined
+    {
+        definition.clips[clips - 1].clipID = definition.nextID;
+        definition.nextID += 1;
+    }
+
+    if (insertedClips > size(oldDefinition.insertedClips)) // new clip inserted
+    {
+        definition.insertedClips[insertedClips - 1].insertedClipID = definition.nextID;
+        definition.nextID += 1;
+    }
+
+    for (var i, clip in definition.clips) // define
+    {
+        definition.clips[i].visible = !isQueryEmpty(context, clip.part);
+        definition.clips[i].showOffset = !isQueryEmpty(context, clip.mateConnector);
+        definition.clips[i].curve = evaluateQueryCount(context, clip.axis) > 1;
+    }
+
+    const changedClip = clipChanged(oldDefinition, definition);
+
+    if (changedClip.clipSize == 0)
+        return definition;
+
+    if (changedClip.clipKey == "drag" && changedClip.clipValue)
+    {
+        for (var i, _ in definition.insertedClips)
+        {
+            if (i != changedClip.clipIndex)
+                definition.insertedClips[i].drag = false;
+        }
+    }
+
+    if (changedClip.clipKey == "resetEdits")
+    {
+        definition.insertedClips[changedClip.clipIndex].resetEdits = true;
+        definition.insertedClips[changedClip.clipIndex].x = 0 * meter;
+        definition.insertedClips[changedClip.clipIndex].y = 0 * meter;
+        definition.insertedClips[changedClip.clipIndex].a = 0 * degree;
+        definition.insertedClips[changedClip.clipIndex].transform = identityTransform();
+    }
+
+    for (var i, _ in definition.insertedClips)
+        definition.insertedClips[i].linkVisible = i > 0;
+
+    if (changedClip.clipKey == "link")
+    {
+        if (definition.insertedClips[changedClip.clipIndex].transform == {})
+            definition.insertedClips[changedClip.clipIndex].transform = identityTransform();
+
+        const finalTransform = transform(matrix(definition.insertedClips[changedClip.clipIndex].transform.linear), vector(definition.insertedClips[changedClip.clipIndex].transform.translation));
+        var previousTransform = identityTransform();
+
+        if (changedClip.clipValue)
+        {
+            definition.insertedClips[changedClip.clipIndex].location = definition.insertedClips[changedClip.clipIndex - 1].location;
+            definition.insertedClips[changedClip.clipIndex].orientation = definition.insertedClips[changedClip.clipIndex - 1].orientation;
+            definition.insertedClips[changedClip.clipIndex].flip = definition.insertedClips[changedClip.clipIndex - 1].flip;
+            definition.insertedClips[changedClip.clipIndex].rotate = definition.insertedClips[changedClip.clipIndex - 1].rotate;
+
+            if (finalTransform != identityTransform())
+            {
+                for (var k = changedClip.clipIndex - 1;; k -= 1)
+                {
+                    previousTransform = previousTransform * inverse(transform(matrix(definition.insertedClips[k].transform.linear),
+                                vector(definition.insertedClips[k].transform.translation)));
+
+                    if (!definition.insertedClips[k].link)
+                        break;
+                }
+            }
+        }
+        else
+        {
+            for (var k = changedClip.clipIndex - 1;; k -= 1)
+            {
+                previousTransform = transform(matrix(definition.insertedClips[k].transform.linear),
+                        vector(definition.insertedClips[k].transform.translation)) * previousTransform;
+
+                if (!definition.insertedClips[k].link)
+                    break;
+            }
+        }
+
+        definition.insertedClips[changedClip.clipIndex].transform = previousTransform * finalTransform;
+    }
+
+    return definition;
+}
