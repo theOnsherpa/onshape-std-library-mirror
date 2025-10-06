@@ -1,0 +1,804 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "90442c40b60ae694e2729d1f", version : "a2a975479b6a7c456d7b15d7");
+icon::import(path : "37300ecd97fc0ac4b5ad8a03", version : "f629aa05ff7625f0732fdd0e");
+
+annotation { "Feature Type Name" : "Wire ref", "Icon" : icon::BLOB_DATA,
+        "Feature Type Description" : "Map references from reference list and assign pin-outs.",
+        "Manipulator Change Function" : "offsetAxis",
+        "Editing Logic Function" : "refEditingLogic" }
+export const wireRef = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Version", "Default" : "204", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.version);
+
+        annotation { "Name" : "References", "Item name" : "reference", "Item label template" : "#id #feedback", "UIHint" : [UIHint.PREVENT_ARRAY_REORDER, UIHint.COLLAPSE_ARRAY_ITEMS, UIHint.FOCUS_INNER_QUERY] }
+        definition.refs is array;
+
+        for (var ref in definition.refs)
+        {
+            annotation { "Name" : "Visible", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            ref.visible is boolean;
+
+            annotation { "Name" : "Manual", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            ref.manual is boolean;
+
+            annotation { "Name" : "Order", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            ref.orderVisible is boolean;
+
+            annotation { "Name" : "Ref ID",
+                        "Description" : "- The next available Ref ID will be automatically selected<br>- To define a different reference, enter a valid Ref ID<br>- Enter a unique Ref ID to manually define a reference" }
+            ref.id is string;
+
+            annotation { "Name" : "Feedback", "Default" : " ", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            ref.feedback is string;
+
+            if (ref.visible)
+            {
+                if (ref.orderVisible)
+                {
+                    if (ref.manual)
+                    {
+                        annotation { "Name" : "Pins",
+                                    "Description" : "- Select pins in the order shown<br>- Pins marked with * are not connected<br>- Use the reorder option in the pin selection to change pin designation<br>- Pin order may change if library connectors are used" }
+                        ref.manualOrder is string;
+                    }
+                    else
+                    {
+                        annotation { "Name" : "Pins", "UIHint" : UIHint.READ_ONLY,
+                                    "Description" : "- Select pins in the order shown<br>- Pins marked with * are not connected<br>- Use the reorder option in the pin selection to change pin designation<br>- Pin order may change if library connectors are used" }
+                        ref.order is string;
+                    }
+                }
+
+                annotation { "Name" : "Parts", "Filter" : EntityType.BODY && ModifiableEntityOnly.YES,
+                            "Description" : "- Select assembled connector part(s)<br>- In-context parts cannot be used as connectors<br>- Skip part selection if creating refs for wires without connectors" }
+                ref.part is Query;
+
+                annotation { "Name" : "Pin curves, faces or edges", "Filter" : BodyType.MATE_CONNECTOR || QueryFilterCompound.ALLOWS_DIRECTION || EntityType.EDGE, "UIHint" : UIHint.ALLOW_QUERY_ORDER }
+                ref.pins is Query;
+
+                annotation { "Name" : "Pin direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                ref.direction is Query;
+
+                annotation { "Name" : "Flip pin", "UIHint" : UIHint.OPPOSITE_DIRECTION }
+                ref.flipPin is boolean;
+
+                annotation { "Name" : "Inline splice", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                ref.inlineSplice is boolean;
+
+                if (ref.inlineSplice)
+                {
+                    annotation { "Name" : "Connects to", "Description" : "- Enter route ID reference connects to" }
+                    ref.connectsTo is string;
+                }
+
+                annotation { "Name" : "Values changed", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                ref.valuesChanged is boolean;
+
+                annotation { "Name" : "Strip length",
+                            "Description" : "- All routed wire paths are insulated<br>- Strip/conductor length added to the ends of each wire path<br>- Set length to zero to remove conductor from wire length calculation" }
+                isLength(ref.stripLength, { (millimeter) : [0, 5, 50], (inch) : 0.2 } as LengthBoundSpec);
+
+                annotation { "Name" : "Stub length" }
+                isLength(ref.stubLength, { (millimeter) : [0.01, 5, 50], (inch) : 0.2 } as LengthBoundSpec);
+
+                annotation { "Name" : "Stub offset" }
+                isLength(ref.stubOffset, { (millimeter) : [-50, 0, 50] } as LengthBoundSpec);
+
+                annotation { "Name" : "Splice percent", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isReal(ref.splicePercent, { (unitless) : [0, 0.5, 1] } as RealBoundSpec);
+            }
+        }
+    }
+    {
+        if (size(definition.refs) > 0)
+            addRefs(context, id, definition);
+    });
+
+function addRefs(context is Context, id is Id, definition is map)
+{
+    var manipulators = {};
+    var refs = getData(context, "refs");
+    var missingRefs = "";
+    var missingPins = "";
+
+    for (var i = 0; i < size(definition.refs); i += 1)
+    {
+        const ref = definition.refs[i];
+        const inContext = ref.part.subqueries == [];
+        const pins = getPinData(context, ref.manual ? ref.manualOrder : ref.order);
+        var refParts = [];
+
+        if (refs[ref.id] == undefined) // existing ref removed from csv or manual ref
+        {
+            if (!ref.manual && ref.id != " ")
+            {
+                if (missingRefs != "")
+                    missingRefs ~= ", ";
+
+                missingRefs ~= ref.id;
+
+                continue;
+            }
+
+            refs[ref.id] = {};
+            refs[ref.id].order = stripStar(getPinOrder(context, id, ref.manualOrder));
+
+            for (var pin in refs[ref.id].order)
+                refs[ref.id] = mergeMaps(refs[ref.id], { (pin) : false });
+        }
+
+        refs[ref.id].assigned = [];
+
+        if (size(evaluateQuery(context, ref.pins)) > size(pins) && ref.orderVisible)
+        {
+            errorWarning(context, id, "Too many pins assigned to reference " ~ ref.id);
+            continue;
+        }
+
+        const refId = id + "ref" + ref.id;
+
+        var toDelete = [];
+
+        for (var j = 0; j < size(evaluateQuery(context, ref.pins)); j += 1)
+        {
+            var part = qIntersection(ref.part, qCompositePartsContaining(qOwnerBody(qNthElement(ref.pins, j))));
+
+            if (isQueryEmpty(context, part) && !inContext)
+                part = last(ref.part.subqueries);
+
+            if (!inContext)
+            {
+                const partId = lastModifyingOperationId(context, part);
+                refParts = isIn(partId, refParts) ? refParts : append(refParts, partId);
+            }
+
+            const pin = qNthElement(ref.pins, j);
+            const pinName = ref.orderVisible ? pins[j] : (pins == [] ? "X" : pins[0]); // a bit brutal but works for now
+            const pinId = ref.orderVisible ? refId + pinName : refId + pinName + j;
+
+            var origin;
+            var direction = isQueryEmpty(context, ref.direction) ? extractDirection(context, pin) : extractDirection(context, ref.direction);
+
+            if (direction == undefined)
+            {
+                const axis = evEdgeTangentLine(context, {
+                            "edge" : pin,
+                            "parameter" : definition.refs[i].splicePercent
+                        });
+
+                origin = axis.origin;
+                direction = axis.direction;
+
+                manipulators["spl-" ~ i] = linearManipulator({
+                            "base" : origin,
+                            "direction" : direction,
+                            "offset" : 0 * meter,
+                            "style" : ManipulatorStyleEnum.TANGENTIAL
+                        });
+            }
+            else
+            {
+
+                try silent
+                {
+                    if (evaluateQuery(context, qHasAttribute(qOwnerBody(pin), "refPinout")) != [])
+                    {
+                        origin = evEdgeTangentLine(context, {
+                                        "edge" : pin,
+                                        "parameter" : 0
+                                    }).origin;
+
+                        toDelete = append(toDelete, qOwnerBody(pin));
+                    }
+                    else
+                        origin = evAxis(context, {
+                                        "axis" : pin
+                                    }).origin;
+                }
+                catch
+                {
+                    origin = evFaceTangentPlane(context, {
+                                    "face" : pin,
+                                    "parameter" : vector(0.5, 0.5)
+                                }).origin;
+                }
+            }
+
+            direction = ref.flipPin ? -direction : direction;
+
+            opFitSpline(context, pinId, {
+                        "points" : [origin + ref.stubOffset * direction, origin + (ref.stubOffset + ref.stubLength) * direction]
+                    });
+
+            refs[ref.id][pinName] = ref.orderVisible ? pinId : refId + pinName;
+            refs[ref.id].splice = !ref.orderVisible;
+            refs[ref.id].strip = ref.stripLength;
+            refs[ref.id].stub = ref.stubLength;
+            refs[ref.id].assigned = inContext ? [] : refParts;
+
+            setProperty(context, {
+                        "entities" : qCreatedBy(pinId, EntityType.BODY),
+                        "propertyType" : PropertyType.NAME,
+                        "value" : ref.id ~ "/" ~ pinName
+                    });
+
+            setAttribute(context, {
+                        "entities" : qCreatedBy(pinId, EntityType.BODY),
+                        "name" : "pinData",
+                        "attribute" : { "ref" : ref.id, "pin" : pinName }
+                    });
+
+            if (j == 0)
+            {
+                manipulators["ref-" ~ i] = linearManipulator({
+                            "base" : origin + direction * ref.stubOffset,
+                            "direction" : direction,
+                            "offset" : ref.stubLength,
+                            "minValue" : 0.01 * millimeter,
+                            "maxValue" : 50 * millimeter
+                        });
+            }
+        } // end of pin array
+
+        if (toDelete != [])
+            opDeleteBodies(context, refId + "deletePins", {
+                        "entities" : qUnion(toDelete)
+                    });
+
+        if (ref.pins.subqueries == [] && ref.visible)
+        {
+            if (missingPins != "")
+                missingPins ~= ", ";
+
+            missingPins ~= ref.id;
+        }
+
+        setData(context, [refs], "refs");
+
+    } // end of ref array
+
+    try silent
+    {
+        addDebugEntities(context, qCreatedBy(id + "ref", EntityType.BODY), DebugColor.CYAN);
+    }
+
+    addManipulators(context, id, manipulators);
+
+    var errors = "";
+
+    if (missingRefs != "")
+        errors = missingRefs ~ " missing from CSV file. ";
+
+    if (missingPins != "")
+        errors ~= missingPins ~ " missing pin data.";
+
+    if (errors != "")
+        errorWarning(context, id, errors);
+}
+
+function whatChanged(oldDefinition is map, definition is map)
+{
+    const refSize = size(definition.refs);
+
+    // New feature or user removed ref
+    if (refSize == 0 || size(oldDefinition.refs) > refSize)
+        return {};
+
+    // User added new ref
+    if (size(oldDefinition.refs) < refSize)
+        return { "refIndex" : refSize - 1 };
+
+    for (var refIndex, refArray in definition.refs)
+        for (var refKey, refValue in refArray)
+            if (refValue != oldDefinition.refs[refIndex][refKey])
+                return { "refIndex" : refIndex, "refKey" : refKey, "refValue" : refValue };
+}
+
+export function refEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    const changedRef = whatChanged(oldDefinition, definition);
+
+    // New feature or user removed ref
+    if (changedRef == {} || changedRef == undefined)
+        return definition;
+
+    definition.refs[changedRef.refIndex] = updateRef(context, id, oldDefinition, definition, changedRef);
+
+    return definition;
+}
+
+function updateRef(context is Context, id is Id, oldDefinition is map, definition is map, changedRef is map)
+{
+    var userChanged = changedRef.refKey == "id";
+    var userAdded = changedRef.refKey == undefined;
+    var refIndex = changedRef.refIndex;
+    var nextRef = {};
+
+    var newRef = definition.refs[refIndex];
+
+    newRef.id = toUpper(newRef.id);
+    newRef.connectsTo = toUpper(newRef.connectsTo);
+    newRef.visible = true;
+
+    // Ignore other user edits
+    if (userChanged || userAdded)
+    {
+        var refData = getData(context, "refs");
+
+        // Check existing refs created "in-feature" and assume they have been / will be connected
+        for (var refs in oldDefinition.refs)
+        {
+            if (refData[refs.id] == undefined)
+                refData[refs.id] = {};
+
+            refData[refs.id].assigned = [];
+        }
+
+        // Check refs already used
+        if (userChanged && refData[newRef.id] != undefined)
+        {
+            if (refData[newRef.id].assigned is array)
+            {
+                newRef.feedback = "(duplicate)";
+                newRef.visible = false;
+                return newRef;
+            }
+
+            nextRef = newRef.id;
+        }
+
+        if (userAdded)
+        {
+            for (var key, refs in refData)
+            {
+                if (refs.assigned is boolean && !refs.assigned)
+                {
+                    nextRef = key;
+                    break;
+                }
+            }
+
+            // no more refs
+            if (nextRef == {})
+            {
+                newRef.id = " ";
+                newRef.feedback = "(no more refs)";
+                newRef.visible = false;
+                return newRef;
+            }
+        }
+
+        if (nextRef != {})
+        {
+            newRef.feedback = " ";
+            newRef.manual = false;
+            newRef.id = nextRef;
+            newRef.part = qNothing();
+            newRef.pins = qNothing();
+            newRef.direction = qNothing();
+            newRef.flipPin = false;
+
+            for (var p, pin in refData[nextRef].order)
+            {
+                newRef.order = p == 0 ? "" : newRef.order ~ ", ";
+                newRef.order ~= pin ~ "*";
+            }
+        }
+
+        newRef.orderVisible = !startsWith(newRef.id, getGlobalVariable(context, "wireSplicePrefix", "SP"));
+
+        if (nextRef == {} && !newRef.manual)
+        {
+            newRef.feedback = "(manual)";
+            newRef.manualOrder = newRef.orderVisible ? "" : "X*";
+            newRef.part = qNothing();
+            newRef.pins = qNothing();
+            newRef.direction = qNothing();
+            newRef.flipPin = false;
+            newRef.manual = true;
+        }
+
+        return newRef;
+    }
+
+    const oldRef = oldDefinition.refs[refIndex];
+
+    if (changedRef.refKey == "manualOrder")
+    {
+        var manualOrder = [];
+        var oldManualPinOrder = getPinOrder(context, id, oldRef.manualOrder);
+        var oldManualPinValues = stripStar(oldManualPinOrder);
+        var manualPinOrder = getPinOrder(context, id, newRef.manualOrder);
+        var manualPinValues = stripStar(manualPinOrder);
+        const existingPins = size(newRef.pins.subqueries);
+
+        for (var p = 0; p < size(manualPinOrder); p += 1)
+        {
+            if (size(oldManualPinOrder) > p && oldManualPinValues[p] == manualPinValues[p])
+                manualOrder = append(manualOrder, oldManualPinOrder[p]);
+            else
+                manualOrder = append(manualOrder, manualPinValues[p] ~ "*");
+        }
+
+        for (var p = 0; p < size(manualOrder); p += 1)
+        {
+            newRef.manualOrder = p == 0 ? "" : newRef.manualOrder ~ ", ";
+            newRef.manualOrder ~= manualOrder[p];
+        }
+    }
+
+    const order = newRef.manual ? "manualOrder" : "order";
+
+    if (oldRef.stripLength != newRef.stripLength ||
+        oldRef.stubLength != newRef.stubLength ||
+        oldRef.stubOffset != newRef.stubOffset)
+    {
+        newRef.valuesChanged = true;
+    }
+
+    if (oldRef.pins != newRef.pins) // pin selection changed manually
+    {
+        const pinCount = size(newRef.pins.subqueries);
+        const connectedPins = getConnectedPins(newRef[order]);
+        var pinOuts = split(newRef[order], ",");
+
+        if (oldRef.pins != undefined && size(oldRef.pins.subqueries) > pinCount) // pin removed
+        {
+            if (isQueryEmpty(context, newRef.pins)) // space bar pressed
+            {
+                for (var j, pinOut in pinOuts)
+                    pinOuts[j] = addStar(pinOut);
+            }
+            else
+            {
+                var indexMissing = 0;
+
+                for (var j, pin in oldRef.pins.subqueries)
+                    if (isQueryEmpty(context, qIntersection(pin, newRef.pins)))
+                    {
+                        indexMissing = j;
+                        break;
+                    }
+
+                var count = -1;
+
+                for (var j, pin in connectedPins)
+                {
+                    if (pin != undefined)
+                        count += 1;
+
+                    if (count == indexMissing)
+                    {
+                        pinOuts[j] = addStar(pinOuts[j]);
+                        break;
+                    }
+                }
+            }
+        }
+        else if (size(pinOuts) >= pinCount) // pin added
+        {
+            const firstUnusedPin = argIn(undefined, connectedPins);
+            pinOuts[firstUnusedPin] = removeStar(pinOuts[firstUnusedPin]);
+
+            var currentPins = newRef.pins.subqueries;
+            currentPins = insertElementAt(currentPins, firstUnusedPin, last(currentPins));
+            currentPins = resize(currentPins, pinCount);
+
+            newRef.pins = qUnion(currentPins);
+        }
+        else if (newRef.orderVisible)
+        {
+            newRef.pins.subqueries[pinCount - 1] = qNothing(); // remove extra pins
+        }
+
+        if (!newRef.orderVisible && isQueryEmpty(context, newRef.part))
+            newRef.inlineSplice = evaluateQueryCount(context, newRef.pins) == 1;
+
+        newRef[order] = arrayToString(pinOuts, ", ");
+    }
+
+    if (oldRef.part != newRef.part) // part(s) manually changed
+    {
+        if (!newRef.orderVisible && evaluateQueryCount(context, newRef.pins) == 1)
+            newRef.inlineSplice = isQueryEmpty(context, newRef.part);
+
+        if (size(oldRef.part.subqueries) > size(newRef.part.subqueries)) // part removed
+        {
+            // remove pins
+            var remainingPins = [];
+            var connectedPins = getConnectedPins(newRef[order]);
+            var filteredPins = filter(connectedPins, function(pin)
+            {
+                return pin != undefined;
+            });
+
+            const partRemoved = qOwnedByBody(qFlattenedCompositeParts(qSubtraction(oldRef.part, newRef.part)));
+
+            for (var j = 0; j < size(filteredPins); j += 1)
+            {
+                const ownedPins = qIntersection(partRemoved, newRef.pins.subqueries[j]);
+
+                if (!isQueryEmpty(context, ownedPins))
+                    connectedPins[filteredPins[j]] = undefined;
+                else
+                    remainingPins = append(remainingPins, newRef.pins.subqueries[j]);
+            }
+
+            newRef.pins = qUnion(remainingPins);
+            newRef[order] = updateConnectedPins(newRef[order], connectedPins);
+        }
+        else if (!isQueryEmpty(context, newRef.part)) // part added
+        {
+            const part = last(newRef.part.subqueries);
+
+            if (isQueryEmpty(context, part->qModifiableEntityFilter())) // in-context part selected
+                return definition;
+
+            const refPinout = part->qFlattenedCompositeParts()->qHasAttribute("refPinout");
+
+            if (refPinout.subqueries != [])
+            {
+                const existingConnections = getConnectedPins(newRef[order]);
+
+                const connectorPins = getAttributes(context, {
+                            "entities" : refPinout,
+                            "name" : "refPinout"
+                        });
+
+                const pinOuts = connectPins(newRef[order], connectorPins);
+
+                newRef[order] = arrayToString(pinOuts.order, ", ");
+
+                var newConnections = mapArray(pinOuts.connected, function(index)
+                {
+                    if (index != undefined)
+                        return index.index;
+                });
+
+                var existingPins = newRef.pins;
+                newRef.pins = qNothing();
+
+                for (var j = 0; j < size(pinOuts.order); j += 1)
+                {
+                    if (isIn(j, existingConnections))
+                    {
+                        newRef.pins = qUnion(newRef.pins, qNthElement(existingPins, 0));
+                        existingPins = qSubtraction(existingPins, qNthElement(existingPins, 0));
+                        continue;
+                    }
+
+                    if (isIn(j, newConnections))
+                    {
+                        const pinByName = qOwnedByBody(qIntersection(refPinout, pinOuts.connected[j].query), EntityType.EDGE);
+                        newRef.pins = qUnion(newRef.pins, pinByName);
+                    }
+                }
+
+                if (!newRef.valuesChanged && connectorPins != [])
+                {
+                    newRef.stripLength = connectorPins[0].stripLength;
+                    newRef.stubLength = connectorPins[0].stubLength;
+                    newRef.stubOffset = 0 * meter;
+                }
+            }
+        }
+
+        if (newRef.part.subqueries == [])
+            newRef.valuesChanged = false;
+    }
+
+    return newRef;
+}
+
+export function offsetAxis(context is Context, definition is map, newManipulators is map) returns map
+{
+    for (var i = 0; i < size(definition.refs); i += 1)
+    {
+        if (newManipulators["ref-" ~ i] != undefined)
+            definition.refs[i].stubLength = abs(newManipulators["ref-" ~ i].offset);
+
+        if (newManipulators["spl-" ~ i] != undefined)
+        {
+            const origin = newManipulators["spl-" ~ i].base + newManipulators["spl-" ~ i].direction * newManipulators["spl-" ~ i].offset;
+
+            const newParam = evDistance(context, {
+                            "side0" : definition.refs[i].pins.subqueries[0],
+                            "side1" : origin
+                        }).sides[0].parameter;
+
+            definition.refs[i].splicePercent = newParam;
+        }
+    }
+
+    return definition;
+}
+
+function getPinData(context is Context, ref is string) returns array
+{
+    var pins = [];
+    const pinOrder = split(ref, ",");
+
+    for (var pin in pinOrder)
+        if (!hasStar(pin))
+            pins = append(pins, pin);
+
+    return pins;
+}
+
+function getPinOrder(context is Context, id is Id, order is string)
+{
+    var pins;
+    var error = "";
+
+    pins = split(order, ";");
+
+    if (size(pins) == 2)
+    {
+        try silent
+        {
+            var start = stringToNumber(pins[0]);
+            var end = stringToNumber(pins[1]);
+
+            pins = start < end ? range(start, end) : range(end, start);
+
+            if (start == end)
+                error = "Range values must be different.";
+        }
+        catch
+        {
+            error = "Range values must be numeric.";
+        }
+    }
+    else
+    {
+        pins = split(order, ",");
+
+        pins = mapArray(pins, function(pin)
+            {
+                return toUpper(pin);
+            });
+    }
+
+    if (error != "")
+        errorWarning(context, id, error);
+
+    return pins;
+}
+
+function connectPins(refPins is string, connectorPins is array) returns map
+{
+    var unconnectedPins = connectorPins->mapArray(function(pin)
+    {
+        return pin.designator;
+    });
+
+    if (unconnectedPins != [] && unconnectedPins[0] == "X") // splice
+    {
+        return { "order" : ["X"], "connected" : [{ "index" : 0, "designator" : "X",
+                        "query" : qHasAttributeWithValueMatching("refPinout", { "designator" : "X" }) }] };
+    }
+    else
+    {
+        var pinOrder = split(refPins, ",");
+        var connectedPins = makeArray(size(pinOrder));
+        var freePins = 0;
+
+        for (var i, pin in pinOrder)
+        {
+            const pinElement = argIn(removeStar(pin), unconnectedPins);
+
+            if (hasStar(pin) && pinElement != undefined) // not already connected and exists in library part
+            {
+                pinOrder[i] = removeStar(pin);
+
+                connectedPins[i] = {
+                        "index" : i,
+                        "designator" : pinOrder[i],
+                        "query" : qHasAttributeWithValueMatching("refPinout", { "designator" : unconnectedPins[pinElement] })
+                    };
+
+                unconnectedPins = removeElementAt(unconnectedPins, pinElement);
+            }
+            else
+            {
+                freePins += 1;
+            }
+        }
+
+        const unconnected = min(freePins, size(unconnectedPins));
+
+        if (unconnected > 0) // match up spare pins
+            for (var i = 0; i < unconnected; i += 1)
+                for (var j, pin in pinOrder)
+                    if (hasStar(pin))
+                    {
+                        pinOrder[j] = removeStar(pin);
+
+                        connectedPins[j] = {
+                                "index" : j,
+                                "designator" : pinOrder[j],
+                                "query" : qHasAttributeWithValueMatching("refPinout", { "designator" : unconnectedPins[0] })
+                            };
+
+                        unconnectedPins = removeElementAt(unconnectedPins, 0);
+
+                        break;
+                    }
+
+        return { "order" : pinOrder, "connected" : connectedPins };
+    }
+}
+
+function hasStar(text is string) returns boolean
+{
+    const textArray = splitIntoCharacters(trim(text));
+    return last(textArray) == "*";
+}
+
+function stripStar(pins is array) returns array
+{
+    pins = mapArray(pins, function(star)
+        {
+            return star is string ? removeStar(star) : star;
+        });
+
+    return pins;
+}
+
+function addStar(text is string) returns string
+{
+    return hasStar(text) ? text : text ~ "*";
+}
+
+function removeStar(text is string) returns string
+{
+    return replace(text, "\\*", "");
+}
+
+function arrayToString(inputArray is array, delimiter is string) returns string
+{
+    return arrayToString(inputArray, "", delimiter);
+}
+
+function arrayToString(inputArray is array, key is string, delimiter is string) returns string
+{
+    var output = "";
+
+    for (var i, element in inputArray)
+    {
+        if (key != "")
+            element = element[key];
+
+        output ~= i == 0 ? "" : delimiter;
+        output ~= element;
+    }
+
+    return output;
+}
+
+function getConnectedPins(refPins is string) returns array
+{
+    var pinOrder = split(refPins, ",");
+    var connectedPins = makeArray(size(pinOrder));
+
+    for (var i, pin in pinOrder)
+        if (!hasStar(pin))
+            connectedPins[i] = i;
+
+    return connectedPins;
+}
+
+function updateConnectedPins(refPins is string, connectedPins is array)
+{
+    var pinOrder = split(refPins, ",");
+
+    for (var i, pin in pinOrder)
+        if (connectedPins[i] == undefined)
+            pinOrder[i] = addStar(pin);
+
+    return arrayToString(pinOrder, ", ");
+}
+
