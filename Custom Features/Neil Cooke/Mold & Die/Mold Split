@@ -1,0 +1,120 @@
+FeatureScript 1324;
+import(path : "onshape/std/common.fs", version : "1324.0");
+icon::import(path : "ae4b32289b6899cb20a3b2c7", version : "5908d1123093794fc59b89bc");
+
+annotation { "Feature Type Name" : "Mold split", "Editing Logic Function" : "editValues", "Icon" : icon::BLOB_DATA, "Feature Type Description" : "Split the Stock into core and cavity."  }
+export const moldSplit = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Mold part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.part is Query;
+
+        annotation { "Name" : "Stock part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.stock is Query;
+
+        annotation { "Name" : "Parting surfaces", "Filter" : EntityType.BODY && BodyType.SHEET }
+        definition.surfaces is Query;
+
+        annotation { "Name" : "Keep parting surfaces" }
+        definition.keep is boolean;
+
+        annotation { "Name" : "Exploded view" }
+        definition.explode is boolean;
+
+        if (definition.explode)
+        {
+            annotation { "Name" : "Explode direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+            definition.direction is Query;
+
+            annotation { "Name" : "Distance" }
+            isLength(definition.distance, LENGTH_BOUNDS);
+        }
+    }
+    {
+        try
+        {
+            opBoolean(context, id + "joinSurfaces", {
+                        "operationType" : BooleanOperationType.UNION,
+                        "detectAdjacencyForSheets" : true,
+                        "recomputeMatches" : true,
+                        "tools" : definition.surfaces,
+                    });
+        }
+
+        opSplitPart(context, id + "splitStock", {
+                    "targets" : definition.stock,
+                    "tool" : definition.surfaces,
+                    "keepTools" : definition.keep });
+
+        var bottom = qSplitBy(id + "splitStock", EntityType.BODY, false);
+        var top = qSplitBy(id + "splitStock", EntityType.BODY, true);
+
+        opBoolean(context, id + "trimPart", {
+                    "tools" : definition.part,
+                    "targets" : definition.stock,
+                    "operationType" : BooleanOperationType.SUBTRACTION,
+                    "keepTools" : true });
+
+        if (definition.explode)
+        {
+            var fixedHalf = qFarthestAlong(qUnion([top, bottom]), getVector(context, definition));
+            var movingHalf = qSubtraction(qUnion([top, bottom]), fixedHalf);
+
+            var direction = transform(getVector(context, definition) * definition.distance);
+
+            opTransform(context, id + "fixedHalf", {
+                        "bodies" : fixedHalf,
+                        "transform" : direction });
+
+            opTransform(context, id + "movingHalf", {
+                        "bodies" : movingHalf,
+                        "transform" : inverse(direction) });
+        }
+
+        setProperty(context, {
+                    "entities" : qUnion([top, bottom]),
+                    "propertyType" : PropertyType.APPEARANCE,
+                    "value" : color(0.8, 0.9, 0.7, 1.0) });
+    });
+
+export function editValues(context is Context, id is Id, oldDefinition is map, definition is map) returns map
+{
+    try silent
+    {
+        if (oldDefinition.part == undefined)
+        {
+            definition.part = qAttributeQuery({ "name" : "moldPart" });
+        }
+        if (oldDefinition.surfaces == undefined)
+        {
+            definition.surfaces = qUnion([qAttributeQuery({ "name" : "moldShutOffSurface" }), qAttributeQuery({ "name" : "moldPartingSurface" })]);
+        }
+        if (oldDefinition.stock == undefined)
+        {
+            definition.stock = qAttributeQuery({ "name" : "moldStock" });
+        }
+        if (oldDefinition.direction == undefined)
+        {
+            definition.direction = qAttributeQuery({ "name" : "moldEjectionDirection" });
+        }
+    }
+    return definition;
+}
+
+function getVector(context is Context, definition is map) returns Vector
+{
+    var normal = Z_DIRECTION;
+
+    try silent
+    {
+        normal = evMateConnector(context, { "mateConnector" : definition.direction }).zAxis;
+    }
+    catch
+    {
+        try silent
+        {
+            normal = evPlane(context, { "face" : definition.direction }).normal;
+        }
+    }
+    return normal;
+}
