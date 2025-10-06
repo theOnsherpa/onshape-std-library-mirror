@@ -1,0 +1,915 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "90442c40b60ae694e2729d1f", version : "a2a975479b6a7c456d7b15d7");
+icon::import(path : "643761fc2c4423940bd7504a", version : "69a2b6278cc1bb18bbbe7762");
+
+export enum ConnectorAction
+{
+    annotation { "Name" : "Insert" }
+    INSERT,
+    annotation { "Name" : "Define" }
+    DEFINE
+}
+
+export enum ConnectorType
+{
+    annotation { "Name" : "Connector" }
+    CONNECTOR,
+    annotation { "Name" : "Terminal" }
+    TERMINAL,
+    annotation { "Name" : "Splice" }
+    SPLICE
+}
+
+export enum UpDirection
+{
+    annotation { "Name" : "+X axis" }
+    X,
+    annotation { "Name" : "-X axis" }
+    X_MINUS,
+    annotation { "Name" : "+Y axis" }
+    Y,
+    annotation { "Name" : "-Y axis" }
+    Y_MINUS,
+    annotation { "Name" : "+Z axis" }
+    Z,
+    annotation { "Name" : "-Z axis" }
+    Z_MINUS
+}
+
+annotation { "Feature Type Name" : "Wire connector", "Icon" : icon::BLOB_DATA,
+        "Feature Type Description" : "Insert or define connector/terminal library parts.",
+        "Manipulator Change Function" : "offsetAxis",
+        "Editing Logic Function" : "editingLogic" }
+export const wireConnector = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Version", "Default" : "204", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.version);
+
+        annotation { "Name" : "New UI", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.newUIVisible is boolean;
+
+        annotation { "Name" : "Parts added", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.partStudioData is boolean;
+
+        annotation { "Name" : "Action", "UIHint" : UIHint.HORIZONTAL_ENUM }
+        definition.action is ConnectorAction;
+
+        if (definition.action == ConnectorAction.INSERT)
+        {
+            annotation { "Name" : "Connector", "Filter" : PartStudioItemType.COMPOSITE_PART, "MaxNumberOfPicks" : 1 }
+            definition.partStudio is PartStudioData;
+
+            if (!definition.newUIVisible)
+            {
+                annotation { "Name" : "Locations", "Filter" : BodyType.MATE_CONNECTOR || QueryFilterCompound.ALLOWS_DIRECTION, "UIHint" : UIHint.ALLOW_QUERY_ORDER }
+                definition.locations is Query;
+
+                annotation { "Name" : "Direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                definition.direction is Query;
+
+                annotation { "Name" : "Orientation", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                definition.orientation is Query;
+
+                annotation { "Name" : "Flip direction", "UIHint" : [UIHint.PRIMARY_AXIS, UIHint.FIRST_IN_ROW] }
+                definition.flip is boolean;
+
+                annotation { "Name" : "Rotate", "UIHint" : UIHint.MATE_CONNECTOR_AXIS_TYPE }
+                definition.rotate is MateConnectorAxisType;
+            }
+            else
+            {
+                annotation { "Name" : "Locations", "Item name" : "Locations", "UIHint" : [UIHint.PREVENT_ARRAY_REORDER, UIHint.FOCUS_INNER_QUERY] }
+                definition.refs is array;
+
+                for (var ref in definition.refs)
+                {
+                    annotation { "Name" : "Copy", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                    ref.refCopyVisible is boolean;
+
+                    if (ref.refCopyVisible)
+                    {
+                        annotation { "Name" : "Link to previous", "Default" : false }
+                        ref.refCopy is boolean;
+                    }
+
+                    if (!ref.refCopy)
+                    {
+                        annotation { "Name" : "Locations", "Filter" : BodyType.MATE_CONNECTOR || QueryFilterCompound.ALLOWS_DIRECTION }
+                        ref.refLocations is Query;
+
+                        annotation { "Name" : "Direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                        ref.refDirection is Query;
+
+                        annotation { "Name" : "Orientation", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS, "MaxNumberOfPicks" : 1 }
+                        ref.refOrientation is Query;
+
+                        annotation { "Name" : "Flip direction", "UIHint" : [UIHint.PRIMARY_AXIS, UIHint.FIRST_IN_ROW] }
+                        ref.refFlip is boolean;
+
+                        annotation { "Name" : "Rotate", "UIHint" : UIHint.MATE_CONNECTOR_AXIS_TYPE }
+                        ref.refRotate is MateConnectorAxisType;
+                    }
+
+                    annotation { "Name" : "Drag", "Default" : false }
+                    ref.refDrag is boolean;
+
+                    annotation { "Name" : "Reset drag", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR, "Default" : true, "Description" : "- Removes all manual connector location edits<br>- Use undo/redo to change individual location edits" }
+                    ref.refDragReset is boolean;
+
+                    annotation { "Name" : "Transform", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                    isAnything(ref.transform);
+                }
+            }
+        }
+        else
+        {
+            annotation { "Name" : "Visible", "Default" : false, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            definition.connectorPartNumberVisible is boolean;
+
+            annotation { "Name" : "Connector parts", "Filter" : EntityType.BODY && (BodyType.SOLID || BodyType.COMPOSITE),
+                        "Description" : "- Select connector, terminal and/or backshell parts<br>- Apply face colors to maintain part appearances<br>- Leave blank to define for an in-context socket/receptacle" }
+            definition.parts is Query;
+
+            annotation { "Name" : "Insertion point", "Filter" : BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1,
+                        "Description" : "- Z and X axes define the connector placement in the 3D wire route" }
+            definition.insert is Query;
+
+            if (definition.connectorPartNumberVisible)
+            {
+                annotation { "Name" : "Layout direction", "Default" : UpDirection.Y, "UIHint" : UIHint.SHOW_LABEL,
+                            "Description" : "- The insertion point axis used in the flattened harness layout" }
+                definition.up is UpDirection;
+            }
+
+            annotation { "Name" : "Type", "Default" : ConnectorType.CONNECTOR, "UIHint" : UIHint.HORIZONTAL_ENUM }
+            definition.connectorType is ConnectorType;
+
+            if (definition.connectorType == ConnectorType.TERMINAL)
+            {
+                annotation { "Name" : "Pinout", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS || EntityType.VERTEX, "MaxNumberOfPicks" : 1 }
+                definition.pinout is Query;
+            }
+            else
+            {
+                annotation { "Name" : "Pinouts", "Filter" : (EntityType.FACE && GeometryType.PLANE) || QueryFilterCompound.ALLOWS_AXIS || EntityType.VERTEX, "UIHint" : UIHint.ALLOW_QUERY_ORDER }
+                definition.pinouts is Query;
+            }
+
+            annotation { "Name" : "Flip", "UIHint" : UIHint.OPPOSITE_DIRECTION,
+                        "Description" : "- Flips the direction of all pinouts<br>- Mate connectors are not affected" }
+            definition.pinFlip is boolean;
+
+            annotation { "Name" : "Name" }
+            definition.connectorName is string;
+
+            if (definition.connectorType == ConnectorType.CONNECTOR)
+            {
+                annotation { "Name" : "Designators" }
+                definition.designators is string;
+            }
+
+            if (definition.connectorPartNumberVisible)
+            {
+                annotation { "Group Name" : "Properties", "Collapsed By Default" : true }
+                {
+                    annotation { "Name" : "Part number" }
+                    definition.connectorPartNumber is string;
+
+                    annotation { "Name" : "Description" }
+                    definition.connectorDescription is string;
+
+                    annotation { "Name" : "Total mass (g)",
+                                "Description" : "- Total mass in grams for all connector parts and terminals" }
+                    isReal(definition.totalMass, { (unitless) : [0, 0, 1000] } as RealBoundSpec);
+
+                    if (definition.connectorType == ConnectorType.CONNECTOR)
+                    {
+                        annotation { "Group Name" : "Terminals", "Collapsed By Default" : true }
+                        {
+                            annotation { "Name" : "Part number" }
+                            definition.terminalPartNumber is string;
+
+                            annotation { "Name" : "Description" }
+                            definition.terminalDescription is string;
+                        }
+
+                        annotation { "Group Name" : "Backshell", "Collapsed By Default" : true }
+                        {
+                            annotation { "Name" : "Part number" }
+                            definition.backshellPartNumber is string;
+
+                            annotation { "Name" : "Description" }
+                            definition.backshellDescription is string;
+                        }
+                    }
+                }
+            }
+
+            annotation { "Group Name" : "Connection", "Collapsed By Default" : false }
+            {
+                annotation { "Name" : "Strip length" }
+                isLength(definition.stripLength, { (millimeter) : [0, 5, 50], (inch) : 0.2 } as LengthBoundSpec);
+
+                annotation { "Name" : "Insulation offset" }
+                isLength(definition.stubOffset, { (millimeter) : [-50, 0, 50], (inch) : 0 } as LengthBoundSpec);
+
+                if (definition.connectorPartNumberVisible)
+                {
+                    annotation { "Name" : "Align insulation", "Default" : false, "Description" : "- Enable for accurate connector to connector wire length measurements<br>- Disable for more control over wire extents<br>- Only applies if connector/terminal parts are selected" }
+                    definition.align is boolean;
+                }
+
+                if (!definition.connectorPartNumberVisible || !definition.align)
+                {
+                    annotation { "Name" : "Insulation length" }
+                    isLength(definition.stubLength, { (millimeter) : [0.01, 5, 50], (inch) : 0.2 } as LengthBoundSpec);
+                }
+            }
+        }
+    }
+    {
+        if (definition.action == ConnectorAction.INSERT)
+        {
+            if (definition.partStudio.buildFunction != undefined)
+                insertConnector(context, id, definition);
+        }
+        else
+            defineConnector(context, id, definition);
+    });
+
+function insertConnector(context is Context, id is Id, definition)
+{
+    var manipulators = {};
+    var connectors = [];
+    const instantiator = newInstantiator(id);
+    const mateConnectors = qMateConnectorsOfParts(qFlattenedCompositeParts(definition.partStudio.partQuery));
+    definition.partStudio.partQuery = qUnion(definition.partStudio.partQuery, mateConnectors);
+
+    if (definition.version < V_204 && !isQueryEmpty(context, definition.locations))
+        definition.refs = upgradeConnectorRefs(definition);
+
+    for (var i, ref in definition.refs)
+    {
+        for (var j, location in evaluateQuery(context, ref.refLocations))
+        {
+            var origin;
+            var cSys;
+            var zAxis = extractDirection(context, location);
+
+            if (!isQueryEmpty(context, ref.refDirection))
+                zAxis = extractDirection(context, ref.refDirection);
+
+            var xAxis = perpendicularVector(zAxis);
+
+            if (!isQueryEmpty(context, ref.refOrientation))
+                xAxis = extractDirection(context, ref.refOrientation);
+
+            zAxis *= ref.refFlip ? -1 : 1;
+
+            if (ref.refRotate == MateConnectorAxisType.PLUS_Y)
+                xAxis = cross(zAxis, xAxis);
+            else if (ref.refRotate == MateConnectorAxisType.MINUS_X)
+                xAxis = -xAxis;
+            else if (ref.refRotate == MateConnectorAxisType.MINUS_Y)
+                xAxis = -cross(zAxis, xAxis);
+
+            try silent
+            {
+                origin = evAxis(context, {
+                                "axis" : location
+                            }).origin;
+            }
+            catch
+            {
+                origin = evFaceTangentPlane(context, {
+                                "face" : location,
+                                "parameter" : vector(0.5, 0.5)
+                            }).origin;
+            }
+
+            try silent
+            {
+                cSys = coordSystem(origin, xAxis, zAxis);
+            }
+            catch
+            {
+                throw regenError("Axes of direction and orientation cannot be parallel", ["direction", "orientation"]);
+            }
+
+            var triadTransform = ref.transform == undefined || ref.transform == {} ? identityTransform() : transform(matrix(ref.transform.linear), vector(ref.transform.translation));
+
+            if (ref.refCopy)
+            {
+                var previousTransform = identityTransform();
+
+                for (var k = i - 1;; k -= 1)
+                {
+                    previousTransform = transform(matrix(definition.refs[k].transform.linear),
+                            vector(definition.refs[k].transform.translation)) * previousTransform;
+
+                    if (!definition.refs[k].refCopy)
+                        break;
+                }
+
+                triadTransform = previousTransform * triadTransform;
+            }
+
+            if (ref.refDrag != undefined && ref.refDrag && j == 0)
+                manipulators["" ~ i] = fullTriadManipulator({
+                            "base" : cSys,
+                            "transform" : triadTransform,
+                            "displayEditView" : true
+                        });
+
+            const instance = addInstance(instantiator, definition.partStudio, {
+                        "transform" : toWorld(cSys) * triadTransform,
+                        "mateConnector" : mateConnectors
+                    });
+
+            connectors = connectors->append(instance);
+        }
+    }
+
+    if (size(connectors) > 0)
+    {
+        instantiate(context, instantiator);
+
+        for (var connector in connectors)
+        {
+            var firstSolid = qNthElement(connector->qBodyType(BodyType.SOLID), 0);
+            var secondMC = qNthElement(qMateConnectorsOfParts(connector), 1);
+
+            if (isQueryEmpty(context, secondMC) || isQueryEmpty(context, firstSolid))
+                continue;
+
+            var connectorData = getAttribute(context, {
+                    "entity" : firstSolid,
+                    "name" : "connectorData"
+                });
+
+            connectorData.upCSys = evMateConnector(context, {
+                        "mateConnector" : secondMC
+                    });
+
+            setAttribute(context, {
+                        "entities" : firstSolid,
+                        "name" : "connectorData",
+                        "attribute" : connectorData
+                    });
+        }
+
+        opDeleteBodies(context, id + "deleteBodies", {
+                    "entities" : qMateConnectorsOfParts(qUnion(connectors))
+                });
+
+        addManipulators(context, id, manipulators);
+    }
+}
+
+function defineConnector(context is Context, id is Id, definition)
+{
+    var parts = definition.parts;
+    const inContextParts = convertInContextParts(context, id, parts);
+
+    if (inContextParts.inContext)
+    {
+        parts = inContextParts.parts;
+        errorInfo(context, id, "Parts contain in-context geometry - insertion point ignored.");
+    }
+    else
+    {
+        if (!isQueryEmpty(context, qContainedInCompositeParts(parts)))
+            parts = qUnion(qContainedInCompositeParts(parts), parts);
+
+        verifyNonemptyQuery(context, definition, "insert", "Select or create a mate connector");
+    }
+
+    if (definition.connectorType == ConnectorType.TERMINAL)
+        verifyNonemptyQuery(context, definition, "pinout", "Select one pinout location");
+    else
+        verifyNonemptyQuery(context, definition, "pinouts", "Select one or more pinout locations");
+
+    var manipulators = {};
+    var backPlane;
+
+    const pinouts = definition.connectorType == ConnectorType.TERMINAL ?
+        evaluateQuery(context, definition.pinout) :
+        evaluateQuery(context, definition.pinouts);
+
+    const designators = getDesignators(context, id, definition, pinouts);
+
+    var firstPinDirection;
+    var pinEnds = [];
+
+    for (var i = 0; i < min(size(designators), size(pinouts)); i += 1)
+    {
+        var originCSys;
+        var direction = extractDirection(context, pinouts[i]);
+
+        if (direction == undefined)
+        {
+            errorWarning(context, id, "A pinout direction is required. Try using a Mate connector.");
+            return;
+        }
+
+        try silent
+        {
+            originCSys = evMateConnector(context, { // test if MC and if so ignore direction flip
+                        "mateConnector" : pinouts[i]
+                    });
+        }
+
+        if (originCSys == undefined)
+        {
+            originCSys = coordSystem(plane(getOrigin(context, id, pinouts[i]), direction));
+            direction = definition.pinFlip ? -direction : direction;
+        }
+        else if (definition.version < V_204) // mate connector direction behaviour changed in 202
+            direction = definition.pinFlip ? -direction : direction;
+
+        if (i == 0)
+            firstPinDirection = direction;
+
+        if (!isQueryEmpty(context, parts))
+        {
+            var trimPlane = plane(originCSys.origin + 0.1 * meter * direction, direction);
+
+            const trimFace = evDistance(context, {
+                        "side0" : trimPlane,
+                        "side1" : definition.parts
+                    });
+
+            trimPlane.origin = trimFace.sides[1].point;
+
+            if (i == 0)
+                backPlane = trimPlane;
+
+            if (definition.align)
+            {
+                const maxStubOffset = evDistance(context, {
+                                "side0" : trimPlane,
+                                "side1" : originCSys.origin
+                            }).distance;
+
+                if (definition.stubOffset > maxStubOffset)
+                    definition.stubOffset = maxStubOffset;
+
+                definition.stubLength = clamp(maxStubOffset - definition.stubOffset, 0.01 * millimeter, 50 * millimeter);
+            }
+        }
+
+        opFitSpline(context, id + "pinout" + i, {
+                    "points" : [
+                        originCSys.origin + definition.stubOffset * direction,
+                        originCSys.origin + (definition.stubOffset + definition.stubLength) * direction
+                    ]
+                });
+
+        if (tolerantEquals(firstPinDirection, direction))
+            pinEnds = append(pinEnds, qEdgeVertex(qCreatedBy(id + "pinout" + i, EntityType.EDGE), false));
+
+        try silent // when stripLength = 0
+        {
+            addDebugArrow(context, originCSys.origin + definition.stubOffset * direction, originCSys.origin + (definition.stubOffset - definition.stripLength) * direction, 0 * meter, DebugColor.MAGENTA);
+        }
+
+        if (i == 0)
+        {
+            if (!definition.align)
+                manipulators["stub"] = linearManipulator({
+                            "base" : originCSys.origin + definition.stubOffset * direction,
+                            "direction" : direction,
+                            "offset" : definition.stubLength,
+                            "minValue" : 0.01 * millimeter,
+                            "maxValue" : 50 * millimeter
+                        });
+
+            manipulators["strip"] = linearManipulator({
+                        "base" : originCSys.origin + definition.stubOffset * direction,
+                        "direction" : -direction,
+                        "offset" : definition.stripLength,
+                        "minValue" : 0 * millimeter,
+                        "maxValue" : 50 * millimeter
+                    });
+
+            manipulators["offset"] = linearManipulator({
+                        "base" : originCSys.origin,
+                        "direction" : direction,
+                        "offset" : definition.stubOffset,
+                        "style" : ManipulatorStyleEnum.TANGENTIAL,
+                        "minValue" : -50 * millimeter,
+                        "maxValue" : 50 * millimeter
+                    });
+        }
+
+        setAttribute(context, {
+                    "entities" : qCreatedBy(id + "pinout" + i, EntityType.BODY),
+                    "name" : "refPinout",
+                    "attribute" : {
+                        "designator" : toString(designators[i]),
+                        "stripLength" : definition.stripLength,
+                        "stubLength" : definition.stubLength
+                    }
+                });
+    }
+
+    try silent
+    {
+        addDebugEntities(context, qCreatedBy(id + "pinout", EntityType.BODY), DebugColor.CYAN);
+    }
+
+    addManipulators(context, id, manipulators);
+
+    var connectorData = {
+        "connectorName" : definition.connectorName,
+        "connectorType" : definition.connectorType,
+        "connectorPartNumber" : definition.connectorPartNumber,
+        "connectorDescription" : definition.connectorDescription,
+        "terminalPartNumber" : definition.terminalPartNumber,
+        "terminalDescription" : definition.terminalDescription,
+        "backshellPartNumber" : definition.backshellPartNumber,
+        "backshellDescription" : definition.backshellDescription
+    };
+
+    var cSys = evMateConnector(context, {
+            "mateConnector" : definition.insert
+        });
+
+    if (!inContextParts.inContext)
+    {
+        // add physical insertion point
+        opMateConnector(context, id + "mateConnector", {
+                    "coordSystem" : cSys,
+                    "owner" : qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.WIRE)->qNthElement(0)
+                });
+
+        if (!isQueryEmpty(context, parts))
+        {
+            const midPoint = evBox3d(context, {
+                        "topology" : qUnion(pinEnds),
+                        "cSys" : cSys
+                    });
+
+            var upCSys = cSys;
+
+            upCSys.origin = toWorld(cSys, box3dCenter(midPoint));
+            upCSys.origin = project(backPlane, upCSys.origin);
+            upCSys.zAxis = -firstPinDirection;
+            upCSys.xAxis = switch (definition.up) {
+                        UpDirection.X : cSys.xAxis,
+                        UpDirection.X_MINUS : -cSys.xAxis,
+                        UpDirection.Y : yAxis(cSys),
+                        UpDirection.Y_MINUS : -yAxis(cSys),
+                        UpDirection.Z : cSys.zAxis,
+                        UpDirection.Z_MINUS : -cSys.zAxis,
+                    };
+
+            if (parallelVectors(upCSys.zAxis, upCSys.xAxis))
+                errorInfo(context, id, "Annotation direction cannot be the same as the pin direction.");
+            else
+            {
+                opMateConnector(context, id + "upConnector", {
+                            "coordSystem" : upCSys,
+                            "owner" : qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.WIRE)->qNthElement(0)
+                        });
+
+                connectorData.upCSys = upCSys;
+            }
+        }
+    }
+
+    opCreateCompositePart(context, id + "compositeConnector", {
+                "bodies" : qUnion(parts, qCreatedBy(id, EntityType.BODY)->qBodyType(BodyType.WIRE)),
+                "closed" : true
+            });
+
+    const compositeConnector = qCreatedBy(id + "compositeConnector", EntityType.BODY);
+
+    if (definition.totalMass > 0)
+    {
+        const volume = evVolume(context, {
+                    "entities" : compositeConnector,
+                });
+
+        const mass = definition.totalMass * gram;
+
+        setProperty(context, {
+                    "entities" : compositeConnector,
+                    "propertyType" : PropertyType.MATERIAL,
+                    "value" : material("Assigned", mass / volume)
+                });
+    }
+
+    if (definition.connectorName != "")
+        setProperty(context, {
+                    "entities" : compositeConnector,
+                    "propertyType" : PropertyType.NAME,
+                    "value" : definition.connectorName
+                });
+
+    if (definition.connectorDescription != "")
+        setProperty(context, {
+                    "entities" : compositeConnector,
+                    "propertyType" : PropertyType.DESCRIPTION,
+                    "value" : definition.connectorName
+                });
+
+    if (definition.connectorPartNumber != "")
+        setProperty(context, {
+                    "entities" : compositeConnector,
+                    "propertyType" : PropertyType.PART_NUMBER,
+                    "value" : definition.connectorPartNumber
+                });
+
+    // This is a temporary measure until I figure out what to do with connector BOMs
+    setProperty(context, {
+                "entities" : compositeConnector,
+                "propertyType" : PropertyType.EXCLUDE_FROM_BOM,
+                "value" : true
+            });
+
+    setProperty(context, {
+                "entities" : compositeConnector,
+                "propertyType" : PropertyType.CUSTOM,
+                "customPropertyId" : "57f3fb8efa3416c06701d61d", // Not revision managed
+                "value" : "true"
+            });
+
+    if (!isQueryEmpty(context, qFlattenedCompositeParts(compositeConnector)->qBodyType(BodyType.SOLID)))
+    {
+        setAttribute(context, {
+                    "entities" : qFlattenedCompositeParts(compositeConnector)->qBodyType(BodyType.SOLID),
+                    "name" : "connectorData",
+                    "attribute" : connectorData
+                });
+    }
+}
+
+function getDesignators(context is Context, id is Id, definition is map, pinouts is array)
+{
+    if (definition.connectorType == ConnectorType.TERMINAL)
+        return range(0, size(pinouts) - 1);
+
+    if (definition.connectorType == ConnectorType.SPLICE)
+        return makeArray(size(pinouts), "X");
+
+    var pins;
+    var error = "";
+
+    pins = split(definition.designators, ";");
+
+    if (size(pins) == 2)
+    {
+        try silent
+        {
+            var start = stringToNumber(pins[0]);
+            var end = stringToNumber(pins[1]);
+
+            pins = start < end ? range(start, end) : range(end, start);
+
+            if (start == end)
+                error = "Range values must be different.";
+        }
+        catch
+        {
+            error = "Range values must be numeric.";
+        }
+    }
+    else
+        pins = split(definition.designators, ",");
+
+    if (size(pins) > 0 && size(pins) != size(pinouts))
+        error = "Number of designators does not match number of pinouts";
+
+    if (error != "")
+        errorWarning(context, id, error);
+
+    return pins;
+}
+
+export function offsetAxis(context is Context, definition is map, newManipulators is map) returns map
+{
+    if (definition.action == ConnectorAction.DEFINE)
+    {
+        if (newManipulators["stub"] != undefined)
+            definition.stubLength = abs(newManipulators["stub"].offset);
+
+        if (newManipulators["strip"] != undefined)
+            definition.stripLength = abs(newManipulators["strip"].offset);
+
+        if (newManipulators["offset"] != undefined)
+            definition.stubOffset = newManipulators["offset"].offset;
+    }
+    else
+    {
+        const key = keys(newManipulators)[0];
+        const index = stringToNumber(key);
+        const triadTransform = newManipulators[key].transform;
+        var tform = transform(transpose(triadTransform.linear), triadTransform.translation);
+
+        if (definition.refs[index].refCopy)
+        {
+            var previousTransform = identityTransform();
+
+            for (var j = index - 1;; j -= 1)
+            {
+                previousTransform = previousTransform * inverse(transform(matrix(definition.refs[j].transform.linear),
+                            vector(definition.refs[j].transform.translation)));
+
+                if (!definition.refs[j].refCopy)
+                    break;
+            }
+
+            tform = previousTransform * tform;
+        }
+
+        definition.refs[index].transform.linear = tform.linear;
+        definition.refs[index].transform.translation = tform.translation;
+    }
+
+    return definition;
+}
+
+function convertInContextParts(context is Context, id is Id, parts is Query) returns map
+{
+    var inContext = false;
+
+    for (var i, part in evaluateQuery(context, parts))
+    {
+        if (isQueryEmpty(context, qModifiableEntityFilter(part)))
+        {
+            opPattern(context, id + "import" + i, {
+                        "entities" : part,
+                        "transforms" : [identityTransform()],
+                        "instanceNames" : ["1"]
+                    });
+
+            parts = qSubtraction(parts, part);
+            inContext = true;
+        }
+    }
+
+    return { "inContext" : inContext, "parts" : qUnion(parts, qCreatedBy(id + "import", EntityType.BODY)) };
+}
+
+function getOrigin(context is Context, id is Id, entity is Query)
+{
+    var origin;
+
+    try silent
+    {
+        origin = evVertexPoint(context, {
+                    "vertex" : entity
+                });
+    }
+    catch
+    {
+        try silent
+        {
+            origin = evAxis(context, {
+                            "axis" : entity
+                        }).origin;
+        }
+        catch
+        {
+            try silent
+            {
+                origin = evFaceTangentPlane(context, {
+                                "face" : entity,
+                                "parameter" : vector(0.5, 0.5)
+                            }).origin;
+            }
+        }
+    }
+
+    return origin;
+}
+
+function upgradeConnectorRefs(definition is map)
+{
+    return [{
+                "refCopyVisible" : false,
+                "refCopy" : false,
+                "refLocations" : definition.locations,
+                "refDirection" : definition.direction,
+                "refOrientation" : definition.orientation,
+                "refFlip" : definition.flip,
+                "refRotate" : definition.rotate,
+                "refDrag" : false,
+                "refDragReset" : true,
+                "transform" : identityTransform(),
+            }];
+}
+
+function whatChanged(oldDefinition is map, definition is map)
+{
+    const refSize = size(definition.refs);
+
+    // New feature or user removed ref
+    if (refSize == 0 || size(oldDefinition.refs) > refSize)
+        return {};
+
+    // User added new ref
+    if (size(oldDefinition.refs) < refSize)
+        return { "refIndex" : refSize - 1 };
+
+    for (var refIndex, refArray in definition.refs)
+        for (var refKey, refValue in refArray)
+            if (refValue != oldDefinition.refs[refIndex][refKey])
+                return { "refIndex" : refIndex, "refKey" : refKey, "refValue" : refValue };
+
+    return {};
+}
+
+export function editingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    if (definition.action == ConnectorAction.DEFINE)
+    {
+        definition.connectorPartNumber = toUpper(definition.connectorPartNumber);
+        definition.designators = toUpper(definition.designators);
+        definition.connectorPartNumberVisible = evaluateQueryCount(context, definition.parts) > 0;
+
+        return definition;
+    }
+
+    definition.partStudioData = definition.partStudio.partQuery.subqueries != [];
+
+    const changedRef = whatChanged(oldDefinition, definition);
+
+    if (changedRef == {})
+        return definition;
+
+    if (definition.version < V_204 && changedRef.refIndex == 0)
+    {
+        if (!isQueryEmpty(context, definition.locations))
+        {
+            definition.refs = upgradeConnectorRefs(definition);
+            definition.locations.subqueries = [];
+        }
+    }
+
+    if (definition.refs[changedRef.refIndex].transform == {})
+        definition.refs[changedRef.refIndex].transform = identityTransform();
+
+    if (size(definition.refs) > size(oldDefinition.refs) && changedRef.refIndex > 0)
+        definition.refs[changedRef.refIndex].refCopyVisible = true;
+
+    if (size(definition.refs) > 1 && (definition.refs[changedRef.refIndex].refDrag || changedRef.refKey == undefined))
+    {
+        for (var i, _ in definition.refs)
+        {
+            if (i != changedRef.refIndex)
+                definition.refs[i].refDrag = false;
+        }
+    }
+
+    if (changedRef.refKey == "refCopy")
+    {
+        const finalTransform = transform(matrix(definition.refs[changedRef.refIndex].transform.linear), vector(definition.refs[changedRef.refIndex].transform.translation));
+        var previousTransform = identityTransform();
+
+        if (definition.refs[changedRef.refIndex].refCopy)
+        {
+            definition.refs[changedRef.refIndex].refLocations = definition.refs[changedRef.refIndex - 1].refLocations;
+            definition.refs[changedRef.refIndex].refDirection = definition.refs[changedRef.refIndex - 1].refDirection;
+            definition.refs[changedRef.refIndex].refOrientation = definition.refs[changedRef.refIndex - 1].refOrientation;
+            definition.refs[changedRef.refIndex].refFlip = definition.refs[changedRef.refIndex - 1].refFlip;
+            definition.refs[changedRef.refIndex].refRotate = definition.refs[changedRef.refIndex - 1].refRotate;
+
+            if (finalTransform != identityTransform())
+            {
+                for (var k = changedRef.refIndex - 1;; k -= 1)
+                {
+                    previousTransform = previousTransform * inverse(transform(matrix(definition.refs[k].transform.linear),
+                                vector(definition.refs[k].transform.translation)));
+
+                    if (!definition.refs[k].refCopy)
+                        break;
+                }
+            }
+        }
+        else
+        {
+            for (var k = changedRef.refIndex - 1;; k -= 1)
+            {
+                previousTransform = transform(matrix(definition.refs[k].transform.linear),
+                        vector(definition.refs[k].transform.translation)) * previousTransform;
+
+                if (!definition.refs[k].refCopy)
+                    break;
+            }
+        }
+        
+        definition.refs[changedRef.refIndex].transform = previousTransform * finalTransform;
+    }
+
+    if (definition.refs[changedRef.refIndex].refDragReset != undefined && !definition.refs[changedRef.refIndex].refDragReset)
+    {
+        definition.refs[changedRef.refIndex].transform = identityTransform();
+        definition.refs[changedRef.refIndex].refDragReset = true;
+    }
+
+    return definition;
+}
