@@ -1,0 +1,411 @@
+FeatureScript 1324;
+import(path : "onshape/std/common.fs", version : "1324.0");
+import(path : "onshape/std/extendendtype.gen.fs", version : "1324.0");
+icon::import(path : "e70232298d8fa8042b745abf", version : "7f95814ad4b7bf087bced669");
+
+annotation { "Feature Type Name" : "Mold shut-Off surface", "Editing Logic Function" : "editValues", "Icon" : icon::BLOB_DATA, "Feature Type Description" : "Locates the split line, copies surfaces and fills any holes or gaps."  }
+export const shutoffSurface = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Mold part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.part is Query;
+
+        annotation { "Name" : "Stock part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.stock is Query;
+
+        annotation { "Name" : "Ejection direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+        definition.direction is Query;
+
+        annotation { "Name" : "Flip ejection direction", "UIHint" : "OPPOSITE_DIRECTION" }
+        definition.flip is boolean;
+
+        annotation { "Name" : "Faces to include", "Filter" : EntityType.FACE }
+        definition.include is Query;
+
+        annotation { "Name" : "Faces to exclude", "Filter" : EntityType.FACE }
+        definition.exclude is Query;
+
+        annotation { "Name" : "Inner loops:", "UIHint" : "SHOW_LABEL" }
+        definition.fillAll is FILL_TYPE;
+
+        annotation { "Name" : "Inner loops to modify", "Item name" : "Edge loop", "Driven query" : "entities", "Item label template" : "#entities" }
+        definition.edgeLoops is array;
+
+        for (var edges in definition.edgeLoops)
+        {
+            annotation { "Name" : "Inner loop edges", "Filter" : EntityType.EDGE }
+            edges.entities is Query;
+
+            annotation { "Name" : "Fill type" }
+            edges.fillType is FILL_TYPE;
+        }
+
+        annotation { "Name" : "Show inner loops", "Default" : true }
+        definition.showLoops is boolean;
+
+        annotation { "Name" : "Show parting line" }
+        definition.partingLine is boolean;
+
+        annotation { "Name" : "Show undercuts" }
+        definition.undercuts is boolean;
+    }
+    {
+        definition.plane = evPlane(context, { "face" : definition.direction });
+        definition.cSys = coordSystem(definition.plane);
+        var stock = evBox3d(context, { "topology" : definition.stock, "cSys" : definition.cSys, "tight" : true });
+
+        var stockCenter = toWorld(definition.cSys, box3dCenter(stock));
+        definition.plane.origin = stockCenter;
+        definition.plane.normal *= definition.flip ? -1 : 1;
+
+        var splitFaces = qSubtraction(qUnion([qOwnedByBody(definition.part, EntityType.FACE), definition.include]), definition.exclude);
+        var splitLine;
+
+        try silent
+        {
+            splitLine = opSplitByIsocline(context, id + "splitLine", {
+                        "faces" : splitFaces,
+                        "direction" : -definition.plane.normal,
+                        "angle" : 0 * degree });
+        }
+        catch
+        {
+            reportFeatureWarning(context, id, "Unable to find split line. Try flipping the ejection direction or adding draft to the part.");
+            return;
+        }
+
+        opExtractSurface(context, id + "shutOffSurface", {
+                    "faces" : qUnion(splitLine.nonSteepFaces),
+                    "offset" : 0 * meter });
+        opExtractSurface(context, id + "undercutSurfaces", {
+                    "faces" : qUnion(splitLine.steepFaces),
+                    "offset" : 0 * meter });
+
+        definition.surface = qCreatedBy(id + "shutOffSurface", EntityType.BODY);
+        definition.allLoops = qLoopEdges(qOwnedByBody(definition.surface, EntityType.FACE));
+        definition.outerLoop = getOuterLoop(context, definition);
+
+        if (definition.partingLine)
+            addDebugEntities(context, definition.outerLoop);
+
+        var undercutCount = deleteExcessBodies(context, id, definition);
+
+        definition.selectedLoops = getSelectedLoops(context, definition);
+        definition.innerLoops = qSubtraction(definition.allLoops, qUnion([definition.outerLoop, qUnion(definition.selectedLoops.loops)]));
+
+        processLoops(context, id, definition);
+
+        var internalLoopCount = 0;
+        var count = size(evaluateQuery(context, definition.innerLoops));
+
+        while (evaluateQuery(context, definition.innerLoops) != [])
+        {
+            var firstLoop = qLoopEdges(qNthElement(definition.innerLoops, 0));
+            if (evaluateQuery(context, firstLoop) != [])
+            {
+                definition.innerLoops = qSubtraction(definition.innerLoops, firstLoop);
+                internalLoopCount += 1;
+                if (definition.showLoops)
+                    addDebugEntities(context, firstLoop);
+            }
+
+            count -= 1;
+            if (count == 0)
+                break;
+        }
+
+        reportFeatureInfo(context, id, "Inner loops = " ~ internalLoopCount ~ ", undercuts = " ~ undercutCount);
+
+        try
+        {
+            setProperty(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "propertyType" : PropertyType.NAME,
+                        "value" : "Mold Shut-Off Surface" });
+
+            setProperty(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "propertyType" : PropertyType.APPEARANCE,
+                        "value" : color(0.9, 0.9, 0.0, 1.0) });
+
+            setAttribute(context, {
+                        "entities" : qCreatedBy(id, EntityType.BODY),
+                        "attribute" : { "name" : "moldShutOffSurface", "flip" : definition.flip } });
+        }
+    });
+
+function deleteExcessBodies(context is Context, id is Id, definition is map) returns number
+{
+    var startPoint = evEdgeTangentLine(context, { "edge" : qNthElement(definition.outerLoop, 0), "parameter" : 0.5 }).origin;
+    var shutOffBodies = qCreatedBy(id + "shutOffSurface", EntityType.BODY);
+    var undercutBodies = qCreatedBy(id + "undercutSurfaces", EntityType.BODY);
+    var keepBodies = qNothing();
+
+    try silent
+    {
+        opDeleteBodies(context, id + "deleteExcessShutOffs", {
+                    "entities" : qUnion([qContainsPoint(undercutBodies, startPoint),
+                                qSubtraction(shutOffBodies, qOwnerBody(definition.outerLoop))]) });
+    }
+    try silent
+    {
+        opDeleteBodies(context, id + "deleteExcessShutOffs", {
+                    "entities" : qUnion([qContainsPoint(undercutBodies, startPoint),
+                                qSubtraction(shutOffBodies, qOwnerBody(definition.outerLoop))]) });
+    }
+
+    try silent
+    {
+        var edgeClashes = evCollision(context, {
+                "tools" : qCreatedBy(id + "undercutSurfaces", EntityType.EDGE),
+                "targets" : qCreatedBy(id + "shutOffSurface", EntityType.EDGE) });
+
+        var checkEdges = qNothing();
+
+        for (var edge in edgeClashes)
+        {
+            if (edge["type"] == ClashType.INTERFERE)
+                checkEdges = qUnion([checkEdges, qAdjacent(edge.tool, AdjacencyType.VERTEX, EntityType.EDGE)]);
+        }
+
+        var checkBodies = qOwnerBody(checkEdges);
+
+        for (var body in evaluateQuery(context, checkBodies))
+        {
+            var laminarEdges = qSubtraction(qLoopEdges(qOwnedByBody(body, EntityType.FACE)), checkEdges);
+
+            if (evaluateQuery(context, laminarEdges) == [])
+            {
+                keepBodies = qUnion([keepBodies, body]);
+            }
+        }
+    }
+
+    try silent
+    {
+        opDeleteBodies(context, id + "deleteExcessUndercutBodies", {
+                    "entities" : qSubtraction(undercutBodies, keepBodies) });
+    }
+
+    var undercuts = size(evaluateQuery(context, undercutBodies));
+
+    if (undercuts > 0)
+    {
+        if (definition.undercuts)
+            addDebugEntities(context, undercutBodies);
+
+        try silent
+        {
+            opBoolean(context, id + "addLeftOverBodies", {
+                        "tools" : qUnion([shutOffBodies, undercutBodies]),
+                        "operationType" : BooleanOperationType.UNION,
+                        "allowSheets" : true });
+        }
+        catch
+        {
+            reportFeatureWarning(context, id, "Part has bad faces. Try excluding highlighted faces.");
+        }
+    }
+
+    return undercuts;
+}
+
+function processLoops(context is Context, id is Id, definition is map)
+{
+    for (var i = 0; i < size(definition.selectedLoops.loops); i += 1)
+    {
+        try silent
+        {
+            if (!closeLoop(context, id + ("selectedLoop" ~ i), definition, definition.selectedLoops.edge[i], definition.selectedLoops.fillType[i]))
+            {
+                reportFeatureInfo(context, id, "Some selected edge loops are not valid.");
+            }
+        }
+    }
+
+    var count = 0;
+
+    if (definition.fillAll != FILL_TYPE.OPEN)
+    {
+        for (var edge in evaluateQuery(context, definition.innerLoops))
+        {
+            if (evaluateQuery(context, edge) != [])
+            {
+                var fillType = definition.fillAll == FILL_TYPE.CLOSE ? FILL_TYPE.CLOSE : FILL_TYPE.FILL;
+
+                closeLoop(context, id + ("fillAll" ~ count), definition, edge, fillType);
+                count += 1;
+            }
+        }
+    }
+}
+
+function closeLoop(context is Context, id is Id, definition is map, edge is Query, fillType is FILL_TYPE) returns boolean
+{
+    if (evaluateQuery(context, edge) == [])
+        return false;
+
+    var startPoint = evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 }).origin;
+    var loop = makeRobustQuery(context, qLoopEdges(edge));
+
+    if (fillType == FILL_TYPE.OPEN)
+    {
+        return true;
+    }
+
+    if (fillType == FILL_TYPE.CLOSE)
+    {
+        return closeLoop(context, id, loop);
+    }
+
+    if (fillType == FILL_TYPE.FILL)
+    {
+        try silent
+        {
+            opFillSurface(context, id + "fill", { "edgesG0" : loop });
+            var fillLoopEdge = qContainsPoint(qCreatedBy(id + "fill", EntityType.EDGE), startPoint);
+
+            opBoolean(context, id + "boolean", {
+                        "tools" : qUnion([definition.surface, qCreatedBy(id + "fill", EntityType.BODY)]),
+                        "operationType" : BooleanOperationType.UNION,
+                        "allowSheets" : true,
+                        "matches" : [{ "topology1" : edge, "topology2" : fillLoopEdge, "matchType" : TopologyMatchType.COINCIDENT }] });
+            return true;
+        }
+    }
+    return false;
+}
+
+function closeLoop(context is Context, id is Id, loop is Query)
+{
+    var loopSize = evBox3d(context, { "topology" : loop, "tight" : true });
+    loopSize = evDistance(context, { "side0" : loopSize.minCorner, "side1" : loopSize.maxCorner }).distance;
+    var success = false;
+
+    startFeature(context, id + "closeFull");
+    try silent
+    {
+        opExtendSheetBody(context, id + "closeFullSurface", { "entities" : loop,
+                    "endCondition" : ExtendEndType.EXTEND_BLIND,
+                    "extendDistance" : loopSize });
+
+        if (evaluateQuery(context, loop) == [])
+            success = true;
+    }
+
+    if (success)
+    {
+        endFeature(context, id + "closeFull");
+        return true;
+    }
+
+    abortFeature(context, id + "closeFull");
+
+    startFeature(context, id + "closeQuarter");
+    try silent
+    {
+        opExtendSheetBody(context, id + "closeQuarterSurface", { "entities" : loop,
+                    "endCondition" : ExtendEndType.EXTEND_BLIND,
+                    "extendDistance" : loopSize / 4 });
+
+        if (evaluateQuery(context, loop) == [])
+            success = true;
+    }
+
+    if (success)
+    {
+        endFeature(context, id + "closeQuarter");
+        return true;
+    }
+
+    abortFeature(context, id + "closeQuarter");
+    return false;
+}
+
+function getSelectedLoops(context is Context, definition is map) returns map
+{
+    var selectedLoops = [];
+    var fillType = [];
+    var selectedEdge = [];
+
+    for (var edges in definition.edgeLoops)
+    {
+        for (var edge in evaluateQuery(context, edges.entities))
+        {
+            var midPoint = try silent(evEdgeTangentLine(context, { "edge" : edge, "parameter" : 0.5 }).origin);
+
+            if (midPoint != undefined)
+            {
+                var laminarEdge = qContainsPoint(qOwnedByBody(definition.surface, EntityType.EDGE), midPoint);
+
+                if (evaluateQuery(context, laminarEdge) == [] ||
+                    edgeIsTwoSided(context, laminarEdge) ||
+                    evaluateQuery(context, qIntersection([laminarEdge, definition.outerLoop])) != [])
+                {
+                    throw regenError("Inner loop selection not valid", [], edge.entity);
+                }
+                else
+                {
+                    selectedEdge = append(selectedEdge, laminarEdge);
+                    selectedLoops = append(selectedLoops, qLoopEdges(laminarEdge));
+                    fillType = append(fillType, edges.fillType);
+                }
+            }
+        }
+    }
+
+    return { "loops" : selectedLoops, "fillType" : fillType, "edge" : selectedEdge };
+}
+
+function getOuterLoop(context is Context, definition is map) returns Query
+{
+    var outerLoopEdge;
+    var allEdges = definition.allLoops;
+    var maxLoopSize = 0 * meter;
+
+    while (size(evaluateQuery(context, allEdges)) > 0)
+    {
+        var loopEdges = qLoopEdges(qNthElement(allEdges, 0));
+        var loopSize = evBox3d(context, { "topology" : loopEdges, "cSys" : definition.cSys, "tight" : true });
+        loopSize = evDistance(context, { "side0" : loopSize.minCorner, "side1" : loopSize.maxCorner }).distance;
+
+        if (loopSize > maxLoopSize)
+        {
+            maxLoopSize = loopSize;
+            outerLoopEdge = qNthElement(loopEdges, 0);
+        }
+        allEdges = qSubtraction(allEdges, loopEdges);
+    }
+    return makeRobustQuery(context, qLoopEdges(outerLoopEdge));
+}
+
+export function editValues(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    try silent
+    {
+        if (oldDefinition.part == undefined)
+        {
+            definition.part = qAttributeQuery({ "name" : "moldPart" });
+        }
+        if (oldDefinition.stock == undefined)
+        {
+            definition.stock = qAttributeQuery({ "name" : "moldStock" });
+        }
+        if (oldDefinition.direction == undefined)
+        {
+            definition.direction = qAttributeQuery({ "name" : "moldEjectionDirection" });
+            definition.flip = getAttributes(context, { "entities" : definition.direction })[0].flip;
+        }
+    }
+    return definition;
+}
+
+export enum FILL_TYPE
+{
+    annotation { "Name" : "Leave open" }
+    OPEN,
+    annotation { "Name" : "Close" }
+    CLOSE,
+    annotation { "Name" : "Fill" }
+    FILL
+}
