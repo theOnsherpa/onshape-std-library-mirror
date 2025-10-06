@@ -1,0 +1,690 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+import(path : "onshape/std/table.fs", version : "2641.0");
+export import(path : "90442c40b60ae694e2729d1f", version : "a2a975479b6a7c456d7b15d7");
+icon::import(path : "249ef5b6842981207ee78def", version : "291ed40ebfee6f8517f3ed81");
+
+annotation { "Feature Type Name" : "Wire data", "Icon" : icon::BLOB_DATA, "Editing Logic Function" : "dataEditingLogic",
+        "Feature Type Description" : "Required to setup the routing environment:<br>- Adds reference and wire length tables<br>- Adds an in-context reference part<br>- Creates a from-to list from an imported CSV file<br>- Imports Variable Studio data to set default values" }
+export const wireData = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Version", "Default" : "204", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.version);
+
+        annotation { "Name" : "From-to CSV file (optional)",
+                    "Description" : "- Select an imported wire list from this or another document<br>- A Variable Studio is required to map non-standard column headers<br> - Leave blank for entirely manual routing" }
+        definition.fromToData is TableData;
+
+        annotation { "Name" : "Override variables", "Default" : false, "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                    "Description" : "- from the Variable table in this Part Studio or from a Variable Studio" }
+        definition.global is boolean;
+
+        if (definition.global)
+        {
+            annotation { "Name" : "CSV units", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.SHOW_LABEL],
+                        "Description" : "- Length units in imported 'from-to' CSV file<br> - This setting has no effect on manual wire routes" }
+            definition.units is WireUnits;
+
+            annotation { "Name" : "Precision", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                        "Description" : "- Wire lengths will be rounded up to this nearest increment<br>- Enter zero to report exact length" }
+            isLength(definition.precision, { (millimeter) : [0, 5, 50], (inch) : 0.2 } as LengthBoundSpec);
+
+            annotation { "Name" : "Bend factor", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE,
+                        "Description" : "- Wire diameter multiplier for unspecified minimum bend radii<br>- Enter zero to ignore bend radius calculation<br>- Minimum bend radius values in 'from-to' list will be used if specified" }
+            isReal(definition.factor, { (unitless) : [0, 0, 100] } as RealBoundSpec);
+
+            annotation { "Name" : "Measure", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.SHOW_LABEL],
+                        "Description" : "- Actual wire lengths including <b>strip length</b><br>- <b>Connector</b> to connector distance<br>- <b>Length*</b> in the wire table indicates measure by <b>connector distance</b>" }
+            definition.measureType is MeasureType;
+
+            annotation { "Name" : "Splice prefix", "Default" : "SP" }
+            definition.splice is string;
+
+        }
+
+        annotation { "Name" : "Units", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isLength(definition.workspaceUnits, { (millimeter) : [1, 1, 1000], (inch) : 1, (centimeter) : 1, (meter) : 1, (foot) : 1, (yard) : 1 } as LengthBoundSpec);
+    }
+    {
+        if (!isQueryEmpty(context, qHasAttribute(qOrigin(EntityType.BODY), "flattenSetup")))
+            throw regenError("Wire data feature must be created in a new Part Studio.");
+
+        if (!isQueryEmpty(context, qHasAttribute(qOrigin(EntityType.BODY), "wires")))
+            throw regenError("Only one Wire data feature per Part Studio permitted.");
+
+        if (definition.global)
+            setGlobalVariables(context, definition);
+
+        checkGlobalVariables(context, id);
+
+        if (definition.fromToData.csvData != undefined)
+        {
+            var wireList = {};
+            const parsedData = parseData(context, id, definition.fromToData);
+
+            for (var wire in parsedData) // check for duplicate wire ids
+            {
+                const wireId = keys(wire)[0];
+
+                if (wireList[wireId] != undefined)
+                    throw regenError("A wire ID is used more than once: " ~ wireId, ["fromToData"]);
+
+                wireList[wireId] = true;
+            }
+
+            setData(context, parsedData, "wires");
+            parseRefs(context);
+        }
+
+        createContextPoint(context, id);
+    });
+
+function parseData(context is Context, id is Id, data is map) returns array
+{
+    var columnMap = {};
+    const csvData = removeEmptyRows(data.csvData);
+    const header = csvData[0];
+    const wireBendFactor = getGlobalVariable(context, "wireBendFactor", 0);
+    const wireLengthUnits = getGlobalVariable(context, "wireLengthUnits", millimeter);
+    const splicePrefix = getGlobalVariable(context, "wireSplicePrefix", "SP");
+    const columnNames = getColumnNames(context); // user modified column names
+
+    // Get column order
+    for (var i = 0; i < size(header); i += 1)
+    {
+        var column = toLower(trim(header[i]));
+
+        if (!isValueIn(column, columnNames)) // ignore unknown or empty columns
+            continue;
+
+        column = getDefaultColumnName(column, columnNames); // get variable name
+
+        if (columnMap[column] != undefined)
+            throw regenError("Column '" ~ header[i] ~ "' occurs multiple times", ["fromToData"]);
+
+        columnMap[column] = i;
+    }
+
+    checkRequiredColumns(context, id, columnMap);
+
+    return mapArray(subArray(csvData, 1, size(csvData)), function(row is array) returns map
+        {
+            var rowData = {};
+
+            // Populate values from row
+            for (var column in columnMap)
+                rowData[column.key] = row[column.value] is string ? trim(row[column.value]) : row[column.value]; // remove whitespace
+
+            if (rowData.id == "")
+                throw regenError("Missing Wire ID in CSV file", ["fromToData"]);
+
+            const wireGeometry = getWireGeometry(rowData, wireLengthUnits);
+
+            if (wireGeometry.outerDiameter == 0 * meter)
+                throw regenError("Wire ID " ~ rowData.wireId ~ " missing diameter/gauge information", ["fromToData"]);
+
+            var wireBendRadius = rowData.wireBendRadius;
+
+            if (wireBendRadius is number)
+                wireBendRadius *= wireLengthUnits;
+            else
+                wireBendRadius = wireGeometry.outerDiameter * wireBendFactor;
+
+            const colorName = {
+                    "rd" : "red",
+                    "gn" : "green",
+                    "bl" : "blue",
+                    "bk" : "black",
+                    "ye" : "yellow",
+                    "wh" : "white",
+                    "vt" : "violet",
+                    "pk" : "pink",
+                    "tq" : "turquoise",
+                    "gy" : "gray",
+                    "or" : "orange",
+                    "xx" : "gray",
+                    "br" : "brown",
+                };
+
+            var wireColor = toLower(trim(toString(rowData.wireColor)));
+
+            if (wireColor == "")
+                wireColor = "gray";
+
+            if (colorName[wireColor] != undefined)
+                wireColor = colorName[wireColor];
+
+            return { formatString(rowData.wireId) : {
+                        "from" : {
+                            "ref" : rowData.wireFromRef,
+                            "pin" : startsWith(rowData.wireFromRef, splicePrefix) ? "X" : formatString(rowData.wireFromPin)
+                        },
+                        "to" : {
+                            "ref" : rowData.wireToRef,
+                            "pin" : startsWith(rowData.wireToRef, splicePrefix) ? "X" : formatString(rowData.wireToPin)
+                        },
+                        "bend" : wireBendRadius,
+                        "diameter" : wireGeometry.outerDiameter,
+                        "core" : wireGeometry.coreDiameter,
+                        "mass" : wireGeometry.mass,
+                        "length" : 0 * meter,
+                        "color" : wireColor,
+                        "gauge" : wireGeometry.wireGauge,
+                        "area" : wireGeometry.wireArea
+                    }
+                };
+        });
+}
+
+function formatString(text)
+{
+    return replace(toUpper(trim(toString(text))), " ", "_");
+}
+
+function parseRefs(context is Context)
+{
+    const fromToData = getData(context, "wires");
+    var refData = {};
+
+    for (var wire in fromToData)
+    {
+        if (wire.key != "order")
+            for (var data in [wire.value.from, wire.value.to])
+            {
+                const ref = data.ref;
+
+                if (refData[ref] == undefined)
+                    refData[ref] = { "assigned" : false };
+
+                const pin = data.pin;
+
+                refData[ref] = mergeMaps(refData[ref], { (pin) : false });
+            }
+    }
+
+    for (var data in refData)
+        refData[data.key] = sortPins(data.value); // adds order array to ref
+
+    setData(context, [refData], "refs");
+}
+
+function sortPins(pins is map)
+{
+    var numArray = [];
+    var charArray = [];
+    const regex = "[\\+]?([\\-]?\\d*[.]?\\d*)?(.*)";
+
+    for (var pin in keys(pins))
+    {
+        if (match(pin, regex).captures[1] != "")
+            numArray = append(numArray, pin);
+        else if (pin != "assigned")
+            charArray = append(charArray, pin);
+    }
+
+    numArray = sort(numArray, function(a, b)
+        {
+            a = stringToNumber(match(a, regex).captures[1]);
+            b = stringToNumber(match(b, regex).captures[1]);
+            return a - b;
+        });
+
+    return mergeMaps(pins, { "order" : concatenateArrays([numArray, charArray]) });
+}
+
+function checkGlobalVariables(context is Context, id is Id)
+{
+    const globalVariables = {
+            "wireLengthUnits" : "wireLengthUnits variable not set - defaulting to mm",
+            "wireBendFactor" : "wireBendFactor not set - bend radius analysis may not work for some wires",
+            "wireLengthPrecision" : "wireLengthPrecision not set - exact wire lengths will be reported"
+        };
+
+    var errors = "";
+
+    for (var entry in globalVariables)
+        try silent
+        {
+            getVariable(context, entry.key);
+        }
+        catch
+        {
+            errors ~= entry.value ~ ".\n";
+        }
+
+    if (errors != "")
+        errorInfo(context, id, errors);
+}
+
+function removeEmptyRows(list is array)
+{
+    var result = [];
+
+    for (var row in list)
+    {
+        const filteredRow = filter(row, function(cell)
+            {
+                return replace(toString(cell), "\\s*", "") != "";
+            });
+
+        if (filteredRow != [])
+            result = append(result, row);
+    }
+
+    return result;
+}
+
+function getColumnNames(context is Context) returns map
+{
+    var defaultColumns = {
+        "wireFromRef" : "from ref",
+        "wireToRef" : "to ref",
+        "wireFromPin" : "from pin",
+        "wireToPin" : "to pin",
+        "wireId" : "wire id",
+        "wireBendRadius" : "bend radius",
+        "wireDiameter" : "diameter",
+        "wireArea" : "area",
+        "wireGauge" : "gauge",
+        "wireInsulation" : "insulation",
+        "wireColor" : "color"
+    };
+
+    for (var column in defaultColumns)
+        defaultColumns[column.key] = toLower(getGlobalVariable(context, column.key, column.value));
+
+    return defaultColumns;
+}
+
+function getDefaultColumnName(text is string, columnNames is map) returns string
+{
+    for (var mapping in columnNames)
+        if (mapping.value == text)
+            return mapping.key;
+
+    return "";
+}
+
+function checkRequiredColumns(context is Context, id is Id, columns is map)
+{
+    const requiredColumns = ["wireFromRef", "wireToRef", "wireFromPin", "wireToPin", "wireId"];
+
+    for (var column in requiredColumns)
+        if (columns[column] == undefined)
+            throw regenError("Column header '" ~ column ~ "' missing from CSV file. Check column exists or use a variable to map column names.");
+}
+
+function createContextPoint(context is Context, id is Id)
+{
+    opPoint(context, id + "contextPoint", {
+                "point" : WORLD_ORIGIN
+            });
+
+    opCreateCompositePart(context, id + "compositePoint", {
+                "bodies" : qCreatedBy(id + "contextPoint", EntityType.BODY),
+                "closed" : true
+            });
+
+    const refPoint = qCreatedBy(id + "compositePoint", EntityType.BODY);
+
+    setProperty(context, {
+                "entities" : refPoint,
+                "propertyType" : PropertyType.EXCLUDE_FROM_BOM,
+                "value" : true
+            });
+
+    setProperty(context, {
+                "entities" : refPoint,
+                "propertyType" : PropertyType.CUSTOM,
+                "customPropertyId" : "57f3fb8efa3416c06701d61d", // Not revision managed
+                "value" : "true"
+            });
+
+    setProperty(context, {
+                "entities" : refPoint,
+                "propertyType" : PropertyType.NAME,
+                "value" : "Wire in-context reference"
+            });
+
+    setProperty(context, {
+                "entities" : refPoint,
+                "propertyType" : PropertyType.DESCRIPTION,
+                "value" : "This part can be used to help manage assemblies and assembly contexts. Assemble the mate connector to the origin and group this part and all wires together."
+            });
+
+    opMateConnector(context, id + "mateConnectorRefPoint", {
+                "coordSystem" : WORLD_COORD_SYSTEM,
+                "owner" : refPoint
+            });
+}
+
+export function dataEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    if (oldDefinition == {})
+        definition = setUnits(context, id, definition);
+
+    return definition;
+}
+
+function setUnits(context is Context, id is Id, definition is map) returns map
+{
+    if (tolerantEquals(definition.workspaceUnits, millimeter))
+        definition.units = WireUnits.millimeter;
+    else if (tolerantEquals(definition.workspaceUnits, centimeter))
+        definition.units = WireUnits.centimeter;
+    else if (tolerantEquals(definition.workspaceUnits, meter))
+        definition.units = WireUnits.meter;
+    else if (tolerantEquals(definition.workspaceUnits, inch))
+        definition.units = WireUnits.inch;
+    else if (tolerantEquals(definition.workspaceUnits, foot))
+        definition.units = WireUnits.foot;
+    else if (tolerantEquals(definition.workspaceUnits, yard))
+        definition.units = WireUnits.yard;
+
+    return definition;
+}
+
+annotation { "Table Type Name" : "Wire data", "Icon" : icon::BLOB_DATA }
+export const fromToTable = defineTable(function(context is Context, definition is map) returns TableArray
+    precondition
+    {
+    }
+    {
+        if (isQueryEmpty(context, qHasAttribute(qOrigin(EntityType.BODY), "flattenSetup")))
+            return tableArray([refTable(context), wireTable(context)]);
+
+        return wireTable(context);
+    });
+
+function refTable(context is Context) returns Table
+{
+    var columnDefinitions = [
+        tableColumnDefinition("id", "Ref ID"),
+        tableColumnDefinition("pins", "Pins")
+    ];
+
+    var rows = [];
+    const refs = getData(context, "refs");
+    const splicePrefix = getGlobalVariable(context, "wireSplicePrefix", "SP");
+
+    if (refs != {})
+    {
+        for (var key, ref in refs)
+        {
+            if (key == " ")
+                continue;
+
+            const isSplice = startsWith(key, splicePrefix);
+
+            var parts = [];
+            var pinsAssigned = true;
+            var row = { "id" : key };
+
+            if (ref.order == [])
+                row.pins = "";
+
+            for (var i, pin in ref.order)
+            {
+                row.pins = i == 0 ? pin : row.pins ~ ", " ~ pin;
+
+                if (ref[pin] == false)
+                    pinsAssigned = false;
+                else // add pins
+                    parts = append(parts, qCreatedBy(isSplice ? resize(ref[pin], size(ref[pin]) - 1) : ref[pin], EntityType.BODY));
+            }
+
+            if (ref.assigned == false || ref.assigned == [])
+                row.id = tableCellError(row.id, "Reference not assigned");
+            else // add parts
+                for (var partId in ref.assigned)
+                    parts = append(parts, qCreatedBy(partId, EntityType.BODY));
+
+            if (!pinsAssigned || ref.order == [])
+                row.pins = tableCellError(row.pins, "Not all pins assigned");
+
+            rows = append(rows, tableRow(row, qUnion(parts)));
+        }
+    }
+
+    if (rows == [])
+        rows = [tableRow({ "id" : "", "pins" : "" })];
+
+    return table("References", columnDefinitions, rows);
+}
+
+function wireTable(context is Context) returns Table
+{
+    const measureType = getGlobalVariable(context, "wireLengthMeasurement", "Strip");
+
+    var columnDefinitions = [
+        tableColumnDefinition("id", "Wire ID"),
+        tableColumnDefinition("from", "From"),
+        tableColumnDefinition("to", "To"),
+        tableColumnDefinition("color", "Color"),
+        tableColumnDefinition("length", measureType == "Strip" ? "Length" : "Length*", TableTextAlignment.RIGHT),
+        tableColumnDefinition("dia", "Diameter", TableTextAlignment.RIGHT),
+        tableColumnDefinition("rad", "Bend Radius", TableTextAlignment.RIGHT)
+    ];
+
+    const fromToData = getData(context, "wires");
+    const pinData = getData(context, "refs");
+    var rows = [];
+    var tableRows = [];
+    var harnesses = {};
+    var harnessOrder = [];
+
+    if (fromToData != {})
+    {
+        for (var wireId in fromToData.order)
+        {
+            const wireData = fromToData[wireId];
+            var row = { "id" : wireId };
+
+            if (wireData.harnessId != undefined)
+            {
+                const cableWireId = wireData.cableId != undefined ? " " ~ wireData.cableId : wireId;
+
+                if (harnesses[wireData.harnessId] == undefined)
+                {
+                    harnesses[wireData.harnessId] = [];
+                    harnessOrder = append(harnessOrder, wireData.harnessId);
+                }
+
+                if (!isIn(cableWireId, harnesses[wireData.harnessId]))
+                    harnesses[wireData.harnessId] = append(harnesses[wireData.harnessId], cableWireId);
+            }
+
+            row.color = toUpper(wireData.color);
+
+            if (wireData.length > 0 * meter)
+                row.length = wireData.length;
+            else
+            {
+                row.id = tableCellError(row.id, "Wire not routed");
+                row.length = tableCellError("", "Wire not routed");
+            }
+
+            const fromPin = pinData[wireData.from.ref][wireData.from.pin];
+            const toPin = pinData[wireData.to.ref][wireData.to.pin];
+
+            row.from = wireData.from.ref ~ "/" ~ wireData.from.pin;
+
+            if (fromPin == false)
+                row.from = tableCellError(row.from, "Pin not defined");
+
+            row.to = wireData.to.ref ~ "/" ~ wireData.to.pin;
+
+            if (toPin == false)
+                row.to = tableCellError(row.to, "Pin not defined");
+
+            row.dia = wireData.diameter == 0 * meter ? tableCellError("", "Value not set") : wireData.diameter;
+
+            if (wireData.cableDiameter != undefined)
+                row.dia = [row.dia, wireData.cableDiameter];
+
+            row.rad = wireData.bend;
+
+            if (wireData.bend == 0 * meter)
+                row.rad = tableCellError("", "Value not set");
+            else if (wireData.bendError == true)
+                row.rad = tableCellError(row.rad, "Minimum bend radius violation");
+
+            rows = append(rows, { "columnIdToCell" : row, "entities" : getSharedWires(context, wireId) });
+        }
+
+        const indent = ["", "​ ​ ​↳ ", "​ ​ ​ ​ ​ ​ ​ ​ ​↳ "];
+        var rowBox = new box(rows);
+        var cableBox = new box(getData(context, "cables"));
+
+        for (var harness in harnessOrder)
+        {
+            var harnessName = "";
+            var harnessRows = [0];
+            var cableQuery = [];
+
+            for (var entry in harnesses[harness])
+            {
+                if (startsWith(entry, " ")) // entry is a cable
+                {
+                    entry = trim(entry);
+                    const cable = processCable(rowBox, cableBox, indent, 1, entry);
+                    harnessRows = concatenateArrays([harnessRows, cable.rows]);
+                    cableQuery = append(cableQuery, cable.entities);
+                }
+                else // entry is a wire
+                {
+                    const rowData = getRowData(rowBox, entry, indent[1]);
+                    harnessRows = append(harnessRows, rowData as TableRow);
+                    cableQuery = append(cableQuery, rowData.entities);
+                }
+
+                if (harnessName != "")
+                    harnessName ~= "/";
+
+                harnessName ~= entry;
+            }
+
+            harnessRows[0] = tableRow({ "id" : "Harness: " ~ harnessName, "from" : "", "to" : "", "color" : "", "length" : "", "dia" : "", "rad" : "" }, qUnion(cableQuery));
+
+            tableRows = concatenateArrays([tableRows, harnessRows]);
+        }
+
+        for (var entry in cableBox[])
+        {
+            if (cableBox[][entry.key] != undefined)
+            {
+                const cable = processCable(rowBox, cableBox, indent, 0, entry.key);
+                tableRows = concatenateArrays([tableRows, cable.rows]);
+            }
+        }
+
+        for (var entry in rowBox[])
+            tableRows = append(tableRows, entry as TableRow);
+    }
+
+    if (tableRows == [])
+        tableRows = [tableRow({ "id" : "", "from" : "", "to" : "", "color" : "", "length" : "", "dia" : "", "rad" : "" })];
+
+    return table("Wires", columnDefinitions, tableRows);
+}
+
+function processCable(rows is box, cables is box, indent is array, level is number, entry is string)
+{
+    var addRows = [];
+    var cableLength = 0 * meter;
+    var cableDiameter = cables[][entry].diameter;
+    var cableColor = cables[][entry].color;
+    var cableBend = cables[][entry].bend;
+    var cableBendError = cables[][entry].error ? tableCellError(cableBend, "Minimum bend radius violation") : undefined;
+    var from;
+    var to;
+    var wireQuery = [];
+
+    for (var wire in cables[][entry].wireIds)
+    {
+        var rowData = getRowData(rows, wire, indent[level + 1]);
+
+        // longest wire defines cable length
+        if (rowData.columnIdToCell.length > cableLength)
+            cableLength = rowData.columnIdToCell.length;
+
+        from = split(rowData.columnIdToCell.from, "/")[0];
+        to = split(rowData.columnIdToCell.to, "/")[0];
+        addRows = append(addRows, rowData as TableRow);
+
+        wireQuery = append(wireQuery, rowData.entities);
+    }
+
+    const cable = [tableRow({
+                    "id" : indent[level] ~ "Cable: " ~ entry,
+                    "length" : cableLength,
+                    "from" : from,
+                    "to" : to,
+                    "color" : cableColor,
+                    "dia" : cableDiameter,
+                    "rad" : cableBendError == undefined ? cableBend : cableBendError
+                }, qUnion(wireQuery))];
+
+    cables[][entry] = undefined;
+
+    return { "rows" : concatenateArrays([cable, addRows]), "entities" : qUnion(wireQuery) };
+}
+
+function getRowData(rows is box, wireName is string, level is string)
+{
+    for (var i, row in rows[])
+        if (row.columnIdToCell.id == wireName)
+        {
+            row.columnIdToCell.id = level ~ wireName;
+            rows[] = removeElementAt(rows[], i);
+            return row;
+        }
+}
+
+function getSharedWires(context is Context, wireId)
+{
+    const allWires = qHasAttribute("wireSegment");
+
+    var currentWires = qHasAttributeWithValueMatching("wireSegment", {
+            "wireId" : wireId
+        });
+
+    const wires = getAttributes(context, {
+                "entities" : allWires,
+                "name" : "wireSegment"
+            });
+
+    for (var wire in wires)
+        if (wire.cableWireIds != undefined && isIn(wireId, wire.cableWireIds))
+            for (var cableWire in wire.cableWireIds)
+                currentWires = qUnion(currentWires, qHasAttributeWithValueMatching("wireSegment", {
+                                "wireId" : cableWire,
+                                "section" : "cable"
+                            }));
+
+    return currentWires;
+}
+
+function setGlobalVariables(context is Context, definition is map)
+{
+    const input = toString(definition.units);
+
+    const units = switch (input)
+        {
+                "millimeter" : millimeter,
+                "centimeter" : centimeter,
+                "meter" : meter,
+                "inch" : inch,
+                "foot" : foot,
+                "yard" : yard
+            };
+
+    if (definition.factor != undefined)
+        setVariable(context, "wireBendFactor", definition.factor, "Wire diameter multiplier for unspecified minimum bend radius");
+    setVariable(context, "wireLengthUnits", units, "Length units in from-to CSV file (" ~ input ~ ")");
+    setVariable(context, "wireLengthPrecision", definition.precision, "Wire lengths will be rounded up to this nearest increment. Enter zero to ignore.");
+    setVariable(context, "wireLengthMeasurement", toString(definition.measureType), "Wire lengths will be calculated to match the manufacturing process (Strip = actual wire lengths, Connector = connector distance)");
+    if (toString(definition.splice) != "")
+        setVariable(context, "wireSplicePrefix", toString(definition.splice), "References starting with this prefix will be designated as a splice.");
+}
