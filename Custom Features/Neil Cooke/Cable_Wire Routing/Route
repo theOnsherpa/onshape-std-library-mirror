@@ -1,0 +1,2329 @@
+FeatureScript 2641;
+import(path : "onshape/std/common.fs", version : "2641.0");
+export import(path : "90442c40b60ae694e2729d1f", version : "a2a975479b6a7c456d7b15d7");
+icon::import(path : "3697c2502662ba3e92e9f50c", version : "56321820aa0568bfa2e5d5f3");
+
+annotation { "Feature Type Name" : "Wire route", "Icon" : icon::BLOB_DATA,
+        "Feature Type Description" : "Route between predefined connector references and clips",
+        "Manipulator Change Function" : "wireManipulatorChange",
+        "Editing Logic Function" : "wireEditingLogic" }
+export const wireRoute = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Version", "Default" : "204", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        isAnything(definition.version);
+
+        annotation { "Name" : "Route IDs", "Item name" : "", "Item label template" : "#id#star #feedback", "UIHint" : [UIHint.COLLAPSE_ARRAY_ITEMS, UIHint.FOCUS_INNER_QUERY] }
+        definition.wires is array;
+
+        for (var wire in definition.wires)
+        {
+            annotation { "Name" : "Is first", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            wire.isFirst is boolean;
+
+            annotation { "Name" : "Visible", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+            wire.visible is boolean;
+
+            annotation { "Name" : "ID", "Description" : "- Automatically gets the next unrouted wire<br>- Type a valid wire ID to route a different wire<br>- Type a unique wire ID to route a manual wire" }
+            wire.id is string;
+
+            annotation { "Name" : "Editing", "Default" : " ", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            wire.star is string;
+
+            annotation { "Name" : "Feedback", "Default" : " ", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            wire.feedback is string;
+
+            annotation { "Name" : "Manual", "UIHint" : UIHint.ALWAYS_HIDDEN }
+            wire.manual is boolean;
+
+            if (wire.visible)
+            {
+                if (wire.manual)
+                {
+                    annotation { "Name" : "From", "Filter" : EntityType.BODY && BodyType.WIRE && SketchObject.NO, "MaxNumberOfPicks" : 1 }
+                    wire.fromPin is Query;
+                }
+                else
+                {
+                    annotation { "Name" : "From", "UIHint" : UIHint.READ_ONLY, "Description" : "- See from-to route list for more detail" }
+                    wire.from is string;
+                }
+
+                if (wire.manual)
+                {
+                    annotation { "Name" : "To", "Filter" : EntityType.BODY && BodyType.WIRE && SketchObject.NO, "MaxNumberOfPicks" : 1 }
+                    wire.toPin is Query;
+                }
+                else
+                {
+                    annotation { "Name" : "To", "UIHint" : UIHint.READ_ONLY, "Description" : "- See from-to route list for more detail" }
+                    wire.to is string;
+                }
+
+                annotation { "Name" : "From splice", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(wire.fromSplice, { (unitless) : [-1, -1, 100] } as IntegerBoundSpec);
+
+                annotation { "Name" : "To splice", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(wire.toSplice, { (unitless) : [-1, -1, 100] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Follow", "Default" : true, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                wire.followVisible is boolean;
+
+                if (!wire.isFirst && wire.followVisible)
+                {
+                    annotation { "Name" : "Follow first route",
+                                "Description" : "- Use the same clips/channels as the first route in this feature<br>- Use <b>Group as cable</b> to bundle all wires together" }
+                    wire.follow is boolean;
+                }
+
+                if (wire.isFirst || (!wire.follow && wire.followVisible))
+                {
+                    annotation { "Name" : "Clips/Channels/Bundles", "Filter" : (BodyType.WIRE && !EntityType.VERTEX) || (EntityType.EDGE && SketchObject.YES && ConstructionObject.NO), "UIHint" : UIHint.ALLOW_QUERY_ORDER,
+                                "Description" : "- Select an existing clip/channel axis<br>- Implicit mate connectors cannot be added to in-context geometry<br>- Select a route centerline from another feature to create a bundle" }
+                    wire.clips is Query;
+
+                    annotation { "Name" : "Use clip order", "Description" : "- Enable to use clip order selection<br>- Disable to use shortest path between clips<br>- Toggling may invalidate any previous route edits" }
+                    wire.useClipOrder is boolean;
+                }
+
+                if (wire.manual)
+                {
+                    annotation { "Name" : "Size by", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM],
+                                "Description" : "<b>Diameter</b> - enter a value for the outside diameter<br><b>Gauge</b> - select AWG size from the option below<br><b>Area</b> - enter the cross sectional area of the wire core" }
+                    wire.geometry is WireGeometry;
+
+                    if (wire.geometry == WireGeometry.DIAMETER)
+                    {
+                        annotation { "Name" : "Outside diameter", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM] }
+                        isLength(wire.diameter, { (millimeter) : [0.01, 2, 100] } as LengthBoundSpec);
+                    }
+                    else if (wire.geometry == WireGeometry.GAUGE)
+                    {
+                        annotation { "Name" : "Gauge", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM], "Description" : "Select AWG size" }
+                        wire.gauge is WireGauge;
+                    }
+                    else
+                    {
+                        annotation { "Name" : "Area", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM], "Description" : "- Enter value as an area with squared units (e.g. 1 mm ^2)", "Default" : "1 mm^2" }
+                        isAnything(wire.area);
+                    }
+
+                    annotation { "Name" : "Insulation thickness", "UIHint" : [UIHint.REMEMBER_PREVIOUS_VALUE, UIHint.MATCH_LAST_ARRAY_ITEM], "Description" : "- Add or subtract this value to get the core or outside diameter" }
+                    isLength(wire.sheathing, { (millimeter) : [0, 0.5, 100] } as LengthBoundSpec);
+                }
+                else
+                {
+                    annotation { "Name" : "Override color" }
+                    wire.overrideColor is boolean;
+                }
+
+                if (wire.overrideColor || wire.manual)
+                {
+                    annotation { "Name" : "Color", "UIHint" : UIHint.SHOW_LABEL }
+                    wire.color is ColorSelection;
+                }
+
+                annotation { "Name" : "Edit route",
+                            "Description" : "Modify tangency and through points for individual route segments<br>- Select segment point to activate<br>- <b>Edit</b> to adjust tangency, through points, and clip direction<br>- <b>Add</b> to create and move additional through points<br>- <b>Remove</b> to delete through points<br>- <b>Nudge</b> to change through point order<br>- To edit a cable, edit the first wire" }
+                wire.edit is boolean;
+
+                if (wire.edit)
+                {
+                    annotation { "Name" : "Reset route", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR, "Default" : true, "Description" : "- Removes all manual edits to a route<br>- Choose a route segment to edit first to reset a single segment<br>- Use undo/redo to change individual edits" }
+                    wire.resetEdits is boolean;
+
+                    annotation { "Name" : "Edit", "UIHint" : UIHint.HORIZONTAL_ENUM }
+                    wire.editAction is EditAction;
+                }
+
+                annotation { "Name" : "Segment", "Default" : -1, "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isInteger(wire.segment, { (unitless) : [-1, -1, 1000] } as IntegerBoundSpec);
+
+                annotation { "Name" : "Clip", "Default" : "[]", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.clip);
+
+                annotation { "Name" : "Clip order", "Default" : "[]", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.clipOrder);
+
+                annotation { "Name" : "Nudge", "Default" : "[]", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.nudge);
+
+                annotation { "Name" : "Flips", "Default" : "[]", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.flipData);
+
+                annotation { "Name" : "Points", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.points);
+
+                annotation { "Name" : "Magnitude", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.magnitude);
+
+                annotation { "Name" : "Bundle", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(wire.bundleOffsets);
+            }
+        }
+
+        annotation { "Name" : "Create cable", "Description" : "- Creates a cable from all the wires in this feature<br>- To edit the cable, edit the first wire" }
+        definition.cable is boolean;
+
+        if (definition.cable)
+        {
+            annotation { "Group Name" : "Cable", "Collapsed By Default" : false, "Driving Parameter" : "cable" }
+            {
+                annotation { "Name" : "Cable ID", "Description" : "- Override cable name for the wire BOM (optional)" }
+                definition.cableName is string;
+
+                annotation { "Name" : "Override diameter", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE, "Description" : "- Manually enter the cable diameter, or<br>- Use the calculated cable diameter plus insulation thickness" }
+                definition.cableOverride is boolean;
+
+                if (definition.cableOverride)
+                {
+                    annotation { "Name" : "Cable diameter", "Description" : "Manual cable diameter value including insulation thickness" }
+                    isLength(definition.cableDiameter, { (millimeter) : [0.01, 5, 500] } as LengthBoundSpec);
+                }
+                else
+                {
+                    annotation { "Name" : "Insulation thickness", "Description" : "Added to calculated (approximate) cable diameter" }
+                    isLength(definition.insulation, { (millimeter) : [0, 0.5, 100] } as LengthBoundSpec);
+                }
+
+                annotation { "Name" : "Offset", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN }
+                isAnything(definition.cableOffset);
+
+                annotation { "Name" : "Strip", "UIHint" : UIHint.ALWAYS_HIDDEN } // deprecated but remains for upgrade task
+                definition.stripTo is StripTo;
+
+                annotation { "Name" : "Strip", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE], "Description" : "Define how cable insulation is stripped back<br>- Strip insulation <b>at first end</b><br>- Do not strip insulation and show the <b>cable only</b><br>- Strip insulation <b>to first clip</b>/channel/bundle" }
+                definition.stripFirst is StripFirst;
+
+                annotation { "Name" : "Strip", "UIHint" : [UIHint.SHOW_LABEL, UIHint.REMEMBER_PREVIOUS_VALUE], "Description" : "Define how cable insulation is stripped back<br>- Strip insulation <b>at second end</b><br>- Do not strip insulation and show the <b>cable only</b><br>- Strip insulation <b>to last clip</b>/channel/bundle" }
+                definition.stripSecond is StripSecond;
+
+                if (definition.stripFirst != StripFirst.CABLE || definition.stripSecond != StripSecond.CABLE)
+                {
+                    annotation { "Name" : "Show wire packing", "UIHint" : UIHint.DISPLAY_SHORT, "Description" : "- Show accurate wire packing" }
+                    definition.pack is boolean;
+
+                    if (definition.pack)
+                    {
+                        annotation { "Name" : "Twist wire packing at first end", "UIHint" : UIHint.MATE_CONNECTOR_AXIS_TYPE }
+                        definition.startTwist is MateConnectorAxisType;
+
+                        annotation { "Name" : "Twist wire packing at second end", "UIHint" : UIHint.MATE_CONNECTOR_AXIS_TYPE }
+                        definition.endTwist is MateConnectorAxisType;
+                    }
+                }
+
+                annotation { "Name" : "Color", "Default" : ColorSelection.GRAY, "UIHint" : UIHint.SHOW_LABEL }
+                definition.cableColor is ColorSelection;
+            }
+        }
+
+        annotation { "Name" : "Create bundle", "Description" : "- Adds wires/cable to an existing wire/cable bundle<br>- First wire channel selections must use existing wire/cable centerlines<br>- Drag the manipulators to move the split point" }
+        definition.bundle is boolean;
+
+        if (definition.bundle)
+        {
+            annotation { "Group Name" : "Bundle", "Collapsed By Default" : false, "Driving Parameter" : "bundle" }
+            {
+                annotation { "Name" : "Split", "Default" : "{}", "UIHint" : UIHint.ALWAYS_HIDDEN } // deprecated but remains for upgrade task
+                isAnything(definition.bundleOffset);
+
+                annotation { "Name" : "Override diameter", "UIHint" : UIHint.REMEMBER_PREVIOUS_VALUE, "Description" : "- Use the calculated bundle diameter plus covering thickness, or<br>- Manually enter the bundle diameter and modify existing bundles" }
+                definition.bundleOverride is boolean;
+
+                if (definition.bundleOverride)
+                {
+                    annotation { "Name" : "Bundle diameter", "Description" : "Manual bundle diameter value including covering thickness" }
+                    isLength(definition.bundleOverrideDiameter, { (millimeter) : [0.01, 5, 500] } as LengthBoundSpec);
+
+                    annotation { "Name" : "Override existing coverings", "Item name" : "Covering",
+                                "Driven query" : "overrideCoverings", "Item label template" : "#bundleOverrideDiameter",
+                                "Description" : "Select coverings from existing bundles to manually adjust diameters" }
+                    definition.bundleOverrides is array;
+
+                    for (var bundleOverride in definition.bundleOverrides)
+                    {
+                        annotation { "Name" : "Existing coverings",
+                                    "Filter" : EntityType.FACE && !(GeometryType.PLANE || GeometryType.CONE || GeometryType.SPHERE),
+                                    "Description" : "Select coverings from existing bundles to manually adjust diameters" }
+                        bundleOverride.overrideCoverings is Query;
+
+                        annotation { "Name" : "Bundle diameter", "Description" : "Manual bundle diameter value including covering thickness" }
+                        isLength(bundleOverride.overrideCoveringDiameter, { (millimeter) : [0.01, 5, 500] } as LengthBoundSpec);
+
+                        annotation { "Name" : "Color", "Default" : ColorSelection.BLACK, "UIHint" : UIHint.SHOW_LABEL }
+                        bundleOverride.overrideCoveringColor is ColorSelection;
+                    }
+                }
+                else
+                {
+                    annotation { "Name" : "Covering thickness", "Description" : "Added to calculated (approximate) combined cable/bundle diameter" }
+                    isLength(definition.covering, { (millimeter) : [0, 0.5, 100] } as LengthBoundSpec);
+                }
+
+                annotation { "Name" : "Color", "Default" : ColorSelection.BLACK, "UIHint" : UIHint.SHOW_LABEL }
+                definition.coveringColor is ColorSelection;
+            }
+        }
+
+        annotation { "Name" : "Show/hide route", "Description" : "- Turn on to show route diameters in 3D<br>- Turn off for better interactive performance" }
+        definition.show is boolean;
+
+        annotation { "Name" : "Feature Id", "Default" : "", "UIHint" : UIHint.ALWAYS_HIDDEN }
+        definition.featureId is string;
+    }
+    {
+        if (definition.featureId == "")
+            throw regenError("Feature needs refreshing after update. Edit the feature and change a value such as \"Show/hide route\".");
+
+        if (size(definition.wires) > 0)
+        {
+            const cableData = getData(context, "cables");
+            const wireData = getData(context, "wires");
+
+            if (cableData[definition.cableName] != undefined || wireData[definition.cableName] != undefined)
+                errorWarning(context, id, "Duplicate cable/wire name.");
+
+            addWire(context, id, getUnits(context, definition));
+        }
+    });
+
+function addWire(context is Context, id is Id, definition is map)
+{
+    const wireIds = getWireIds(context, definition);
+    const pinData = getPins(context, id, definition);
+
+    if (pinData == {})
+        return;
+
+    var firstFeatureId;
+    var cableBendError = false;
+    var cableRoute;
+    var cable = { "length" : 0 * meter };
+
+    if (definition.cable)
+    {
+        cable.packing = getCablePacking(pinData, wireIds.wires);
+        cable.diameter = definition.cableOverride ? definition.cableDiameter : 2 * (definition.insulation + last(cable.packing).radius * meter);
+        cable.bend = getCableBendRadius(context, cable.diameter, wireIds, pinData);
+        cable = getCablePoints(context, definition, cable, pinData);
+    }
+
+    // upgrade tasks
+    definition = upgradeStrip(definition);
+    definition = upgradeBundles(definition);
+
+    // wire loop
+    for (var w, wireId in wireIds.wires)
+    {
+        // upgrade tasks
+        definition.wires[w].points = upgrade(definition.version, definition.wires[w].points);
+        definition.wires[w].magnitude = upgrade(definition.version, definition.wires[w].magnitude);
+
+        const featureId = id + "wire" + wireId;
+        var wireData = { (wireId) : pinData[wireId] };
+
+        if (wireData == {})
+            continue;
+
+        if (wireData[wireId].length > 0 * meter)
+        {
+            errorWarning(context, id, "" ~ wireId ~ " already routed in a previous feature");
+            continue;
+        }
+
+        wireData[wireId].color = definition.wires[w].overrideColor ? definition.wires[w].color : wireData[wireId].color;
+        wireData[wireId].featureId = featureId;
+
+        if (w == 0)
+            firstFeatureId = featureId;
+
+        if (definition.cable && w == 0)
+        {
+            wireData[wireId].cable = { "id" : firstFeatureId };
+            wireData[wireId].cable.startVector = cable.startVector;
+            wireData[wireId].cable.endVector = cable.endVector;
+            wireData[wireId].cable.simplifiedStartVector = cable.simplifiedStartVector;
+            wireData[wireId].cable.diameter = cable.diameter;
+            wireData[wireId].cable.color = definition.cableColor;
+        }
+
+        wireData = setPinData(context, featureId, definition, w, wireData);
+
+        var bendError = false;
+        var wireRoute = definition.cable && definition.stripFirst == StripFirst.CABLE ? [cable.simplifiedStartVector] : [wireData[wireId].from.vector];
+
+        if (w == 0 || (!definition.cable && !definition.wires[w].follow) || !definition.cable)
+        {
+            const clipList = getClipList(context, definition, wireData[wireId], wireIds, wireId, w, []); // returns clips and bundles
+
+            if (definition.cable && (definition.stripFirst != StripFirst.CLIP || clipList == []))
+            {
+                wireRoute = append(wireRoute, cable.startVector);
+                wireRoute = append(wireRoute, cable.startVector);
+            }
+
+            wireRoute = getClipOrder(context, definition, clipList, wireRoute, w, false);
+
+            clipManipulators(context, definition, clipList, w);
+
+            if (definition.cable && (definition.stripSecond != StripSecond.CLIP || clipList == []))
+            {
+                wireRoute = append(wireRoute, cable.endVector);
+                wireRoute = append(wireRoute, cable.endVector);
+            }
+
+            wireRoute = append(wireRoute, definition.cable && definition.stripSecond == StripSecond.CABLE ? cable.simplifiedEndVector : wireData[wireId].to.vector);
+        }
+
+        if (definition.cable)
+        {
+            if (w == 0)
+                cableRoute = wireRoute;
+            else
+            {
+                wireRoute = cableRoute;
+                wireRoute[0] = definition.stripFirst == StripFirst.CABLE ? cable.simplifiedStartVector : wireData[wireId].from.vector;
+                wireRoute[size(wireRoute) - 1] = definition.stripSecond == StripSecond.CABLE ? cable.simplifiedEndVector : wireData[wireId].to.vector;
+            }
+        }
+
+        const wireSegments = size(wireRoute) / 2;
+        const startOffset = definition.cable ? 0 : 1;
+        const endOffset = wireSegments + startOffset;
+
+        // start segment loop
+        for (var c = startOffset; c < endOffset; c += 1)
+        {
+            var wireTags = getWireTags(wireData, wireId, {});
+            const bend = wireData[wireId].bend;
+            const curveIndex = "c" ~ c;
+            const startIndex = curveIndex ~ "s";
+            const endIndex = curveIndex ~ "e";
+            const curveId = featureId + "segment" + c;
+            const wireStart = wireRoute[(c - startOffset) * 2];
+            const wireEnd = wireRoute[(c - startOffset) * 2 + 1];
+            const magnitude = norm(wireStart.origin - wireEnd.origin);
+
+            const startMagnitude = definition.wires[w].magnitude[startIndex] == undefined ? magnitude.value : definition.wires[w].magnitude[startIndex];
+            const endMagnitude = definition.wires[w].magnitude[endIndex] == undefined ? magnitude.value : definition.wires[w].magnitude[endIndex];
+            definition.wires[w].magnitude = mergeMaps(definition.wires[w].magnitude, { (startIndex) : startMagnitude, (endIndex) : endMagnitude }); // required for manipulators
+
+            if (w == 0 || !definition.cable
+                || c == startOffset && (definition.cable && definition.stripFirst != StripFirst.CABLE)
+                || c == endOffset - 1 && (definition.cable && definition.stripSecond != StripSecond.CABLE))
+            {
+                if (startMagnitude > 0 && endMagnitude > 0)
+                {
+                    var splinePoints = getTriadPoints([wireStart.origin], definition.wires[w].points[curveIndex]);
+                    splinePoints = append(splinePoints, wireEnd.origin);
+
+                    if (definition.cable && definition.pack && (c == startOffset || c == endOffset - 1))
+                        splinePoints = packSplinePoints(context, definition, cable, wireId, c == startOffset, wireStart, wireEnd, splinePoints);
+
+                    try silent
+                    {
+                        opFitSpline(context, curveId, {
+                                    "points" : splinePoints,
+                                    "startDerivative" : wireStart.direction * startMagnitude,
+                                    "endDerivative" : wireEnd.direction * endMagnitude
+                                });
+                    }
+                    catch
+                    {
+                        errorWarning(context, id, "Wire self-intersects. Check clip/channel selections, undo or reset changes.");
+                    }
+                }
+
+                if (definition.cable)
+                {
+                    if (c == startOffset)
+                        wireTags.section = definition.stripFirst == StripFirst.CABLE ? "cable" : "start";
+
+                    else if (c == endOffset - 1)
+                        wireTags.section = definition.stripSecond == StripSecond.CABLE ? "cable" : "end";
+
+                    else
+                    {
+                        wireTags.section = "cable";
+                        wireTags.cableWireIds = wireIds.wires;
+                        wireTags.cableId = wireIds.cable;
+                        wireTags.cable = { "diameter" : cable.diameter, "color" : wireData[wireId].cable.color, "bend" : cable.bend };
+                    }
+                }
+
+                updateWireAttributes(context, qCreatedBy(curveId, EntityType.BODY), wireTags);
+            }
+
+            if (definition.cable && wireTags.section == "cable")
+                cableBendError = getBendRadius(context, curveId, definition, cable.bend, definition.wires[w].segment == c) ? true : cableBendError;
+            else
+                bendError = getBendRadius(context, curveId, definition, bend, definition.wires[w].segment == c) ? true : bendError;
+
+            if (definition.wires[w].edit)
+                if (!definition.wires[w].follow || (definition.wires[w].follow && (c == startOffset || c == endOffset - 1)))
+                definition.wires[w] = mergeMaps(definition.wires[w], editWire(context, featureId, definition, w, c, wireSegments, cable, wireData));
+
+        } // end segment loop
+
+        const wireTags = {
+                "cableBendError" : definition.cable ? cableBendError : undefined,
+                "cableBend" : definition.cable ? cable.bend : undefined,
+                "bendError" : bendError,
+                "length" : getLength(context, definition, wireData[wireId]),
+                "cableId" : definition.cable ? wireIds.cable : undefined
+            };
+
+        setData(context, [{ (wireId) : mergeMaps(wireData[wireId], wireTags) }], "wires");
+
+    } // end wire loop
+
+    makeWire(context, id, definition);
+}
+
+function editWire(context is Context, featureId is Id, definition is map, wireNumber is number, segmentNumber is number, maxSegments is number, cable is map, wireData is map) returns map
+{
+    var manipulators = {};
+    const curveId = featureId + "segment" + segmentNumber;
+    const curveIndex = "c" ~ segmentNumber;
+    const wireIndex = "w" ~ wireNumber ~ curveIndex;
+    const wire = definition.wires[wireNumber];
+
+    // Nothing selected
+    if (wire.segment != segmentNumber && !isIn(wire.editAction, [EditAction.ADD, EditAction.REMOVE, EditAction.NUDGE]))
+    {
+        try silent
+        {
+            if (!definition.cable || (definition.cable && wireNumber == 0) ||
+                (definition.cable && (segmentNumber == 0 || segmentNumber == maxSegments - 1)))
+            {
+                const checkPoint = evEdgeTangentLine(context, {
+                                "edge" : qCreatedBy(curveId, EntityType.EDGE),
+                                "parameter" : 0.5
+                            }).origin;
+
+                // Add curve selection point
+                manipulators[wireIndex] = pointsManipulator({ "points" : [checkPoint], "index" : -1 });
+            }
+        }
+    }
+    else
+    {
+        const triadPoints = getTriadPoints([], upgrade(definition.version, wire.points)[curveIndex]);
+
+        if (triadPoints != [] && wire.editAction == EditAction.REMOVE)
+        {
+            // Clear selections and place points where points exist
+            manipulators[wireIndex] = pointsManipulator({
+                        "points" : triadPoints,
+                        "index" : -1
+                    });
+        }
+        else if (wire.editAction == EditAction.NUDGE)
+        {
+            if (!wire.manual)
+            {
+                if (wire.fromSplice >= 0)
+                {
+                    const spliceCount = wire.fromSplice % evaluateQueryCount(context, qCreatedBy(wireData[wire.id].from.pinId, EntityType.EDGE));
+
+                    const fromPoint = evVertexPoint(context, {
+                                "vertex" : qEdgeVertex(qNthElement(qCreatedBy(wireData[wire.id].from.pinId, EntityType.EDGE), spliceCount), false)
+                            });
+
+                    manipulators[wireIndex ~ "as"] = pointsManipulator({
+                                "points" : [fromPoint],
+                                "index" : -1
+                            });
+                }
+
+                if (wire.toSplice >= 0)
+                {
+                    const spliceCount = wire.toSplice % evaluateQueryCount(context, qCreatedBy(wireData[wire.id].to.pinId, EntityType.EDGE));
+
+                    const toPoint = evVertexPoint(context, {
+                                "vertex" : qEdgeVertex(qNthElement(qCreatedBy(wireData[wire.id].to.pinId, EntityType.EDGE), spliceCount), false)
+                            });
+
+                    manipulators[wireIndex ~ "ae"] = pointsManipulator({
+                                "points" : [toPoint],
+                                "index" : -1
+                            });
+                }
+            }
+
+            if (triadPoints != [])
+            {
+                const pointCount = size(triadPoints);
+                var endTriadPoints = pointCount == 1 ? [triadPoints[0]] : [triadPoints[0], last(triadPoints)];
+
+                var endPointCount = size(endTriadPoints);
+                var midTriadPoints = pointCount < 3 ? [] : subArray(triadPoints, 1, pointCount - 1);
+
+                if (segmentNumber == 1 && endPointCount > 1)
+                {
+                    midTriadPoints = concatenateArrays([[endTriadPoints[0]], midTriadPoints]);
+                    endTriadPoints = [endTriadPoints[1]];
+                }
+
+                if (segmentNumber == maxSegments && endPointCount > 1)
+                {
+                    if (maxSegments > 1)
+                    {
+                        midTriadPoints = concatenateArrays([midTriadPoints, [endTriadPoints[1]]]);
+
+                        endTriadPoints = [endTriadPoints[0]];
+                    }
+                    else // no clips
+                    {
+                        midTriadPoints = [];
+                        endTriadPoints = [];
+                    }
+                }
+
+                endPointCount = size(endTriadPoints);
+
+                manipulators[wireIndex] = pointsManipulator({
+                            "points" : endTriadPoints,
+                            "index" : -1
+                        });
+
+                for (var point in midTriadPoints)
+                    addDebugPoint(context, point, DebugColor.MAGENTA);
+
+                if (wire.nudge != [] && wire.nudge[0] == segmentNumber)
+                {
+                    const pointIndex = (segmentNumber == 1 || wire.nudge[1] == 1) ? pointCount - 1 : wire.nudge[1];
+
+                    const node = evDistance(context, {
+                                    "side0" : wire.points["c" ~ wire.nudge[0]][pointIndex],
+                                    "side1" : qCreatedBy(curveId, EntityType.EDGE)
+                                }).sides[1].parameter;
+
+                    const curvePoint = evEdgeTangentLine(context, {
+                                "edge" : qCreatedBy(curveId, EntityType.EDGE),
+                                "parameter" : node
+                            });
+
+                    if (segmentNumber < maxSegments && (endPointCount == 1 || (endPointCount == 2 && pointIndex > 0)))
+                        manipulators[wireIndex ~ "n"] = flipManipulator({ // next
+                                    "base" : curvePoint.origin,
+                                    "direction" : curvePoint.direction,
+                                    "flipped" : false
+                                });
+
+                    if (segmentNumber > 1 && pointIndex == 0)
+                        manipulators[wireIndex ~ "p"] = flipManipulator({ // previous
+                                    "base" : curvePoint.origin,
+                                    "direction" : curvePoint.direction,
+                                    "flipped" : true
+                                });
+                }
+            }
+        }
+        else if (wire.editAction == EditAction.ADD)
+        {
+            for (var k = 0; k < size(triadPoints); k += 1)
+                addDebugPoint(context, triadPoints[k], DebugColor.MAGENTA);
+
+            manipulators[wireIndex] = pointsManipulator({
+                        "points" : getIntermediatePoints(context, curveId, triadPoints),
+                        "index" : -1
+                    });
+        }
+        else
+        {
+            for (var k = 0; k < size(triadPoints); k += 1)
+            {
+                manipulators[wireIndex ~ "t" ~ k] = triadManipulator({
+                            "base" : WORLD_ORIGIN,
+                            "offset" : triadPoints[k],
+                        });
+
+                addDebugPoint(context, triadPoints[k], DebugColor.MAGENTA);
+            }
+        }
+    }
+
+    if (wire.segment == segmentNumber && wire.editAction == EditAction.EDIT)
+    {
+        try silent
+        {
+            const curvePoints = evEdgeTangentLines(context, {
+                        "edge" : qCreatedBy(curveId, EntityType.EDGE),
+                        "parameters" : [0, 1]
+                    });
+
+            const startOrigin = curvePoints[0].origin;
+            const startDirection = curvePoints[0].direction;
+            const startOffset = upgrade(definition.version, wire.magnitude)[curveIndex ~ "s"] * meter / 3;
+
+            addDebugArrow(context, startOrigin, startOrigin + startDirection * startOffset, 0 * meter, DebugColor.MAGENTA);
+
+            manipulators[wireIndex ~ "s"] = linearManipulator({
+                        "base" : startOrigin,
+                        "direction" : startDirection,
+                        "offset" : startOffset,
+                        "minValue" : 0.001 * meter,
+                        "style" : ManipulatorStyleEnum.SECONDARY
+                    });
+
+            const endOrigin = curvePoints[1].origin;
+            const endDirection = -curvePoints[1].direction;
+            const endOffset = upgrade(definition.version, wire.magnitude)[curveIndex ~ "e"] * meter / 3;
+
+            addDebugArrow(context, endOrigin, endOrigin + endDirection * endOffset, 0 * meter, DebugColor.MAGENTA);
+
+            manipulators[wireIndex ~ "e"] = linearManipulator({
+                        "base" : endOrigin,
+                        "direction" : endDirection,
+                        "offset" : endOffset,
+                        "minValue" : 0.001 * meter,
+                        "style" : ManipulatorStyleEnum.SECONDARY
+                    });
+
+            if (definition.cable && (segmentNumber == 1 || segmentNumber == maxSegments - 2))
+            {
+                const start = segmentNumber == 1;
+                const end = segmentNumber == maxSegments - 2;
+
+                if (start)
+                {
+                    const offset = definition.cableOffset["c0"] == undefined ? cable.startOffset : vector(definition.cableOffset["c0"]);
+                    const xAngle = definition.cableOffset["x0"] == undefined ? 0 * degree : definition.cableOffset["x0"];
+                    const yAngle = definition.cableOffset["y0"] == undefined ? 0 * degree : definition.cableOffset["y0"];
+                    const zAngle = definition.cableOffset["z0"] == undefined ? 0 * degree : definition.cableOffset["z0"];
+
+                    manipulators[wireIndex ~ "c0"] = triadManipulator({
+                                "base" : cable.start.origin,
+                                "offset" : offset,
+                            });
+
+                    manipulators[wireIndex ~ "x0"] = angularManipulator({
+                                "axisOrigin" : cable.start.origin + offset,
+                                "axisDirection" : X_DIRECTION,
+                                "rotationOrigin" : cable.start.origin + offset + vector(0, 1, 0) * millimeter,
+                                "angle" : xAngle
+                            });
+
+                    manipulators[wireIndex ~ "y0"] = angularManipulator({
+                                "axisOrigin" : cable.start.origin + offset,
+                                "axisDirection" : Y_DIRECTION,
+                                "rotationOrigin" : cable.start.origin + offset + vector(0, 0, 1) * millimeter,
+                                "angle" : yAngle
+                            });
+
+                    manipulators[wireIndex ~ "z0"] = angularManipulator({
+                                "axisOrigin" : cable.start.origin + offset,
+                                "axisDirection" : Z_DIRECTION,
+                                "rotationOrigin" : cable.start.origin + offset + vector(1, 0, 0) * millimeter,
+                                "angle" : zAngle
+                            });
+                }
+
+                if (end)
+                {
+                    const offset = definition.cableOffset["c1"] == undefined ? cable.endOffset : vector(definition.cableOffset["c1"]);
+                    const xAngle = definition.cableOffset["x1"] == undefined ? 0 * degree : definition.cableOffset["x1"];
+                    const yAngle = definition.cableOffset["y1"] == undefined ? 0 * degree : definition.cableOffset["y1"];
+                    const zAngle = definition.cableOffset["z1"] == undefined ? 0 * degree : definition.cableOffset["z1"];
+
+                    manipulators[wireIndex ~ "c1"] = triadManipulator({
+                                "base" : cable.end.origin,
+                                "offset" : offset,
+                            });
+
+                    manipulators[wireIndex ~ "x1"] = angularManipulator({
+                                "axisOrigin" : cable.end.origin + offset,
+                                "axisDirection" : X_DIRECTION,
+                                "rotationOrigin" : cable.end.origin + offset + vector(0, 1, 0) * millimeter,
+                                "angle" : xAngle
+                            });
+
+                    manipulators[wireIndex ~ "y1"] = angularManipulator({
+                                "axisOrigin" : cable.end.origin + offset,
+                                "axisDirection" : Y_DIRECTION,
+                                "rotationOrigin" : cable.end.origin + offset + vector(0, 0, 1) * millimeter,
+                                "angle" : yAngle
+                            });
+
+                    manipulators[wireIndex ~ "z1"] = angularManipulator({
+                                "axisOrigin" : cable.end.origin + offset,
+                                "axisDirection" : Z_DIRECTION,
+                                "rotationOrigin" : cable.end.origin + offset + vector(1, 0, 0) * millimeter,
+                                "angle" : zAngle
+                            });
+                }
+            }
+        }
+    }
+
+    addManipulators(context, makeId(definition.featureId), manipulators);
+
+    return wire;
+}
+
+export function wireManipulatorChange(context is Context, definition is map, newManipulators is map) returns map
+{
+    const key = keys(newManipulators)[0];
+    const splitKey = match(key, "w(\\d*)c(\\d*)([setcbxyzdfnpa])?(.*)").captures;
+    const wire = stringToNumber(splitKey[1]);
+    const segment = stringToNumber(splitKey[2]);
+    const curve = "c" ~ segment;
+    const index = "w" ~ wire ~ curve;
+    const keyType = splitKey[3];
+    const other = splitKey[4];
+
+    if (keyType == "c") // cable end position
+    {
+        definition.cableOffset[keyType ~ other] = newManipulators[key].offset;
+    }
+    else if (keyType == "b") // bundle splice point
+    {
+        const origin = newManipulators[key].base + newManipulators[key].direction * newManipulators[key].offset;
+        const clips = getClipEquivalent(context, definition, newManipulators[key].base, wire);
+
+        const newParam = evDistance(context, {
+                        "side0" : clips.path,
+                        "side1" : origin
+                    }).sides[0].parameter;
+
+        definition.wires[wire].bundleOffsets[curve ~ keyType ~ other] = newParam;
+    }
+    else if (isIn(keyType, ["x", "y", "z"])) // cable end angle
+    {
+        definition.cableOffset[keyType ~ other] = newManipulators[key].angle;
+    }
+    else if (keyType == "t") // segment point triad
+    {
+        const triad = stringToNumber(other);
+        var points = upgrade(definition.version, definition.wires[wire].points)[curve];
+        points[triad] = newManipulators[key].offset;
+        definition.wires[wire].points = mergeMaps(definition.wires[wire].points, { (curve) : points });
+
+        if (!definition.wires[wire].useClipOrder)
+            definition.wires[wire].clipOrder = getEditingLogicClipOrder(context, definition, wire);
+    }
+    else if (isIn(keyType, ["s", "e"])) // start and end segment magnitude
+    {
+        const arrow = curve ~ keyType;
+        definition.wires[wire].magnitude[arrow] = newManipulators[index ~ keyType].offset.value * 3;
+    }
+    else if (keyType == "d") // clip selector
+    {
+        definition.wires[wire].clip = newManipulators[key].points[0];
+        definition.wires[wire].segment = -1;
+    }
+    else if (keyType == "f") // clip direction
+    {
+        const clips = getClipEquivalent(context, definition, newManipulators[key].base, wire);
+        definition.wires[wire].flipData[clips.index].flip = newManipulators[key].flipped ? 1 : 0;
+    }
+    else if (keyType == "n") // nudge next
+    {
+        if (definition.wires[wire].points["c" ~ segment + 1] == undefined)
+            definition.wires[wire].points["c" ~ segment + 1] = [];
+
+        definition.wires[wire].points["c" ~ segment + 1] = concatenateArrays([[definition.wires[wire].points[curve][size(definition.wires[wire].points[curve]) - 1]], definition.wires[wire].points["c" ~ segment + 1]]);
+
+        definition.wires[wire].points[curve] = resize(definition.wires[wire].points[curve], size(definition.wires[wire].points[curve]) - 1);
+        definition.wires[wire].nudge = [segment + 1, 0];
+        definition.wires[wire].segment = segment + 1;
+    }
+    else if (keyType == "p") // nudge previous
+    {
+        if (definition.wires[wire].points["c" ~ segment - 1] == undefined)
+            definition.wires[wire].points["c" ~ segment - 1] = [];
+
+        definition.wires[wire].points["c" ~ segment - 1] = concatenateArrays([definition.wires[wire].points["c" ~ segment - 1], [definition.wires[wire].points[curve][0]]]);
+
+        definition.wires[wire].points[curve] = removeElementAt(definition.wires[wire].points[curve], 0);
+        definition.wires[wire].nudge = [segment - 1, size(definition.wires[wire].points["c" ~ segment - 1]) - 1];
+        definition.wires[wire].segment = segment - 1;
+    }
+    else if (keyType == "a") // alternate splice point
+    {
+        if (other == "s") // start connector is splice
+            definition.wires[wire].fromSplice += 1;
+        else
+            definition.wires[wire].toSplice += 1;
+    }
+    else // segment point selected
+    {
+        const pointIndex = newManipulators[index].index;
+        definition.wires[wire].clip = []; // turn off any previously selected clips
+        definition.wires[wire].segment = segment;
+
+        if (definition.wires[wire].editAction == EditAction.ADD)
+        {
+            const triadPoints = definition.wires[wire].points[curve] == undefined ? [] : definition.wires[wire].points[curve];
+
+            if (triadPoints == [])
+                definition.wires[wire].points = mergeMaps(definition.wires[wire].points,
+                    { (curve) : [vector(newManipulators[index].points[0])] });
+            else if (definition.wires[wire].segment == segment)
+                definition.wires[wire].points[curve] = insertElementAt(definition.wires[wire].points[curve], pointIndex, vector(newManipulators[index].points[pointIndex]));
+        }
+        else if (definition.wires[wire].editAction == EditAction.REMOVE)
+        {
+            definition.wires[wire].points[curve] = removeElementAt(definition.wires[wire].points[curve], newManipulators[index].index);
+            definition.wires[wire].segment = -1;
+        }
+        else if (definition.wires[wire].editAction == EditAction.NUDGE)
+        {
+            definition.wires[wire].nudge = [segment, newManipulators[index].index];
+            definition.wires[wire].segment = -1;
+        }
+    }
+
+    return definition;
+}
+
+function whatChanged(oldDefinition is map, definition is map)
+{
+    const wireSize = size(definition.wires);
+
+    // New feature or user removed wire
+    if (wireSize == 0 || size(oldDefinition.wires) > wireSize || arrayParameterReordered(oldDefinition, definition))
+        return {};
+
+    // User added new wire
+    if (size(oldDefinition.wires) < wireSize)
+        return { "wireIndex" : wireSize - 1 };
+
+    for (var wireKey, wireValue in definition)
+        if (wireValue != oldDefinition[wireKey])
+        {
+            if (wireKey == "wires")
+            {
+                for (var wireIndex, wireArray in definition.wires)
+                    for (var wireKey, wireValue in wireArray)
+                        if (wireValue != oldDefinition.wires[wireIndex][wireKey])
+                            return { "wireIndex" : wireIndex, "wireKey" : wireKey, "wireValue" : wireValue };
+            }
+
+            return { "wireKey" : wireKey, "wireValue" : wireValue };
+        }
+}
+
+export function wireEditingLogic(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    definition.featureId = id[0]; // because manipulator change does not include id
+
+    const changedWire = whatChanged(oldDefinition, definition);
+
+    // New feature or user removed/reordered wires
+    if (changedWire == {} || changedWire == undefined)
+        return definition;
+
+    const wireKey = changedWire.wireKey;
+
+    if (isIn(wireKey, ["stripFirst", "stripSecond"]))
+    {
+        definition.stripTo = StripTo.DEPRECATED;
+        return definition;
+    }
+
+    if (isIn(wireKey, ["nudge", "magnitude", "segment", "bundleOffsets", "points", "clip", "flipData"])) // manipulator change functions
+        return definition;
+
+    const wireIndex = changedWire.wireIndex;
+    const wireValue = changedWire.wireValue;
+
+    if (wireKey == "cable" || wireKey == undefined) // toggle cable or added new wire
+        for (var i, _ in definition.wires)
+            definition.wires[i].followVisible = !definition.cable;
+
+    if (wireKey == "cableName")
+        definition.cableName = toUpper(definition.cableName);
+
+    if (wireIndex == undefined) // anything after this is wire related
+        return definition;
+
+    var nextWire = {};
+
+    definition.wires[0].isFirst = true;
+    definition.wires[wireIndex].nudge = [];
+
+    if (wireKey == "resetEdits")
+    {
+        const segment = definition.wires[wireIndex].segment;
+
+        definition.wires[wireIndex].resetEdits = true;
+        definition.wires[wireIndex].editAction = EditAction.EDIT;
+
+        if (segment == -1)
+        {
+            for (var i, flip in definition.wires[wireIndex].flipData)
+                definition.wires[wireIndex].flipData[i] = mergeMaps(flip, { "flip" : -1 });
+
+            definition.wires[wireIndex].magnitude = {};
+            definition.wires[wireIndex].points = {};
+            definition.wires[wireIndex].clip = [];
+            definition.wires[wireIndex].bundleOffsets = {};
+
+            if (wireIndex == 0)
+                definition.cableOffset = {};
+        }
+        else
+        {
+            definition.wires[wireIndex].magnitude["c" ~ segment ~ "s"] = undefined;
+            definition.wires[wireIndex].magnitude["c" ~ segment ~ "e"] = undefined;
+            definition.wires[wireIndex].points["c" ~ segment] = undefined;
+            definition.wires[wireIndex].segment = -1;
+        }
+        return definition;
+    }
+
+    if (isIn(wireValue, [EditAction.ADD, EditAction.REMOVE, EditAction.NUDGE]))
+        definition.wires[wireIndex].segment = -1;
+
+    if (wireKey == "clips" || wireKey == "useClipOrder")
+    {
+        if (isQueryEmpty(context, definition.wires[wireIndex].clips)) // check for spacebar pressed
+        {
+            const lastClipCount = size(definition.wires[wireIndex].flipData);
+
+            if (lastClipCount > 1) // spacebar pressed
+            {
+                // remove all magnitudes except start/end
+                var newMagnitude = {};
+
+                newMagnitude["c1s"] = definition.wires[wireIndex].magnitude["c1s"];
+                newMagnitude["c1e"] = definition.wires[wireIndex].magnitude["c" ~ lastClipCount + 1 ~ "e"];
+
+                definition.wires[wireIndex].magnitude = newMagnitude;
+
+                var newPoints = { "c1" : [] };
+
+                for (var point in definition.wires[wireIndex].points)
+                    newPoints.c1 = concatenateArrays([newPoints.c1, point.value]);
+
+                definition.wires[wireIndex].points = newPoints.c1 != [] ? newPoints : {};
+                definition.wires[wireIndex].flipData = {};
+                definition.wires[wireIndex].clipOrder = [];
+                definition.wires[wireIndex].bundleOffsets = {};
+                definition.wires[wireIndex].segment = -1;
+
+                return definition;
+            }
+        }
+
+        const clipOrder = getEditingLogicClipOrder(context, definition, wireIndex);
+
+        definition.wires[wireIndex].clipOrder = clipOrder;
+
+        const newClips = qUnion(qCreatedBy(id + "wire" + definition.wires[wireIndex].id + "clip", EntityType.EDGE), qCreatedBy(id + "wire" + definition.wires[wireIndex].id + "bundle", EntityType.EDGE));
+
+        if (size(oldDefinition.wires[wireIndex].clipOrder) < size(clipOrder)) // clip added
+        {
+            var newFlipData = makeArray(size(clipOrder));
+
+            for (var i, order in clipOrder)
+            {
+                const chain = getAttribute(context, {
+                                "entity" : qOwnerBody(qNthElement(newClips, order)),
+                                "name" : "wireSegment"
+                            }).chain;
+
+                var success = false;
+
+                for (var flip in definition.wires[wireIndex].flipData)
+                {
+                    if (areQueriesEquivalent(context, chain as Query, flip as Query))
+                    {
+                        newFlipData[i] = flip;
+                        success = true;
+                        break;
+                    }
+                }
+
+                if (!success)
+                    newFlipData[i] = mergeMaps(chain, { "flip" : -1 });
+            }
+
+            definition.wires[wireIndex].flipData = newFlipData;
+
+            const newClipPosition = indexOf(clipOrder, size(clipOrder) - 1) + 1; // to make non-zero
+            var newMagnitude = {};
+
+            // shuffle magnitude values around added clip
+            for (var key in keys(definition.wires[wireIndex].magnitude))
+            {
+                const keyNumber = stringToNumber(substring(key, 1, length(key) - 1));
+
+                if (keyNumber < newClipPosition)
+                {
+                    newMagnitude["c" ~ keyNumber ~ "s"] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ "s"];
+                    newMagnitude["c" ~ keyNumber ~ "e"] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ "e"];
+                    continue;
+                }
+
+                const startEnd = substring(key, length(key) - 1, length(key));
+
+                if (keyNumber == newClipPosition)
+                {
+                    if (startEnd == "s")
+                        newMagnitude["c" ~ keyNumber ~ "s"] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ "s"];
+                    else
+                    {
+                        newMagnitude["c" ~ keyNumber + 1 ~ "e"] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ "e"];
+                        definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ "e"] = undefined;
+                    }
+
+                    continue;
+                }
+
+                newMagnitude["c" ~ keyNumber + 1 ~ startEnd] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ startEnd];
+            }
+
+            definition.wires[wireIndex].magnitude = newMagnitude;
+
+            var newPoints = {};
+
+            // shuffle point values around added clip
+            for (var key in keys(definition.wires[wireIndex].points))
+            {
+                const keyNumber = stringToNumber(substring(key, 1, length(key)));
+
+                if (keyNumber < newClipPosition)
+                {
+                    newPoints["c" ~ keyNumber] = definition.wires[wireIndex].points["c" ~ keyNumber];
+                    continue;
+                }
+
+                newPoints["c" ~ keyNumber + 1] = definition.wires[wireIndex].points["c" ~ keyNumber];
+            }
+
+            definition.wires[wireIndex].points = newPoints;
+        }
+        else if (size(oldDefinition.wires[wireIndex].clipOrder) > size(clipOrder)) // clip removed
+        {
+            // 1. Get new clip dependencies
+            var newChains = getAttributes(context, {
+                    "entities" : qOwnerBody(newClips),
+                    "name" : "wireSegment"
+                });
+
+            newChains = qUnion(mapArray(newChains, function(chain)
+                    {
+                        return chain.chain;
+                    }));
+
+            // 2. Get old clip geometry
+            oldDefinition.old = true;
+
+            const oldClipOrder = getEditingLogicClipOrder(context, oldDefinition, wireIndex);
+
+            const oldClips = qUnion(qCreatedBy(id + "oldWire" + definition.wires[wireIndex].id + "clip", EntityType.EDGE), qCreatedBy(id + "oldWire" + definition.wires[wireIndex].id + "bundle", EntityType.EDGE));
+
+            // 3. Get old clip dependencies
+            var clipRemoved = 0;
+            var lostClip;
+
+            for (var index, order in oldClipOrder)
+            {
+                const oldChain = getAttribute(context, {
+                                "entity" : qOwnerBody(qNthElement(oldClips, order)),
+                                "name" : "wireSegment"
+                            }).chain;
+
+                if (isQueryEmpty(context, qIntersection(oldChain, newChains)))
+                {
+                    lostClip = oldChain;
+                    clipRemoved = index + 1;
+                    break;
+                }
+            }
+
+            // 4. Remove flip data no longer used
+            for (var index, flip in definition.wires[wireIndex].flipData)
+                if (!isQueryEmpty(context, qIntersection(lostClip as Query, flip as Query)))
+                {
+                    definition.wires[wireIndex].flipData = removeElementAt(definition.wires[wireIndex].flipData, index);
+                    break;
+                }
+
+            if (clipRemoved > 0)
+            {
+                // shuffle magnitude values around removed clip
+                definition.wires[wireIndex].magnitude["c" ~ clipRemoved ~ "e"] = undefined;
+                definition.wires[wireIndex].magnitude["c" ~ clipRemoved + 1 ~ "s"] = undefined;
+
+                for (var key in keys(definition.wires[wireIndex].magnitude))
+                {
+                    const keyNumber = stringToNumber(substring(key, 1, length(key) - 1));
+
+                    if (keyNumber < clipRemoved)
+                        continue;
+
+                    const startEnd = substring(key, length(key) - 1, length(key));
+
+                    if (keyNumber == clipRemoved && startEnd == "s") // to keep previous clip intact
+                        continue;
+
+                    definition.wires[wireIndex].magnitude["c" ~ keyNumber - 1 ~ startEnd] = definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ startEnd];
+                    definition.wires[wireIndex].magnitude["c" ~ keyNumber ~ startEnd] = undefined;
+                }
+
+                // shuffle point values around removed clip
+                if (definition.wires[wireIndex].points["c" ~ clipRemoved + 1] != undefined)
+                {
+                    if (definition.wires[wireIndex].points["c" ~ clipRemoved] == undefined)
+                        definition.wires[wireIndex].points["c" ~ clipRemoved] = [];
+
+                    definition.wires[wireIndex].points["c" ~ clipRemoved] = concatenateArrays([definition.wires[wireIndex].points["c" ~ clipRemoved], definition.wires[wireIndex].points["c" ~ clipRemoved + 1]]);
+
+                    definition.wires[wireIndex].points["c" ~ clipRemoved + 1] = undefined;
+
+                    if (definition.wires[wireIndex].points["c" ~ clipRemoved] == [])
+                        definition.wires[wireIndex].points["c" ~ clipRemoved] = undefined;
+                }
+
+                for (var key in keys(definition.wires[wireIndex].points))
+                {
+                    const keyNumber = stringToNumber(substring(key, 1, length(key)));
+
+                    if (keyNumber <= clipRemoved)
+                        continue;
+
+                    definition.wires[wireIndex].points["c" ~ keyNumber - 1] = definition.wires[wireIndex].points["c" ~ keyNumber];
+                    definition.wires[wireIndex].points["c" ~ keyNumber] = undefined;
+                }
+            }
+        }
+
+        definition.wires[wireIndex].segment = -1;
+        definition.wires[wireIndex].clip = [];
+
+        return definition;
+    }
+
+    if (wireKey == "edit")
+    {
+        for (var j, _ in definition.wires)
+        {
+            definition.wires[j].segment = -1;
+            definition.wires[j].clip = [];
+            definition.wires[j].editAction = EditAction.EDIT;
+
+            if (j == wireIndex && wireValue)
+                definition.wires[j].star = "*";
+            else
+            {
+                definition.wires[j].edit = false;
+                definition.wires[j].star = " ";
+            }
+        }
+
+        return definition;
+    }
+
+    if (wireKey == "editAction" && (wireValue == "REMOVE" || wireValue == "NUDGE"))
+    {
+        definition.wires[wireIndex].segment = -1;
+        definition.wires[wireIndex].clip = [];
+
+        return definition;
+    }
+
+    definition.wires[wireIndex].id = toUpper(definition.wires[wireIndex].id);
+
+    // Ignore other user edits
+    if (wireKey == "id" || wireKey == undefined) // user changed ID or added new wire
+    {
+        // Get connections created in previous features
+        var connections = getConnectionData(context);
+        var lastWireUsed = argIn(false, connections.connected);
+
+        // Check existing wires created "in-feature" and assume they have been / will be connected
+        for (var wires in oldDefinition.wires)
+        {
+            var wireUsed = argIn(wires.id, connections.order);
+
+            if (wireUsed == undefined) // wire is manual
+            {
+                wireUsed = size(connections.order);
+                connections.order = append(connections.order, wires.id);
+                connections.connected = append(connections.connected, true);
+            }
+            else
+            {
+                connections.connected[wireUsed] = true;
+                lastWireUsed = wireUsed; // finds the position in the table to find the next logical wire
+            }
+        }
+
+        // Check wires already used
+        if (wireKey == "id") // user changed ID
+        {
+            for (var i, wire in connections.order)
+                if (connections.connected[i] && wire == definition.wires[wireIndex].id)
+                {
+                    definition.wires[wireIndex].feedback = "(duplicate)";
+                    definition.wires[wireIndex].visible = false;
+                    return definition;
+                }
+
+            for (var i, wire in connections.order)
+                if (wire == definition.wires[wireIndex].id) // wire exists
+                {
+                    definition.wires[wireIndex].edit = false;
+                    nextWire = connections.order[i];
+                    lastWireUsed = i;
+                    break;
+                }
+        }
+
+        if (wireKey == undefined) // user added new wire
+        {
+            // no more wires
+            if (!isIn(false, connections.connected))
+            {
+                definition.wires[wireIndex].feedback = "(no more wires)";
+                definition.wires[wireIndex].id = " ";
+                definition.wires[wireIndex].visible = false;
+                return definition;
+            }
+
+            nextWire = connections.order[lastWireUsed == undefined ? 0 : getNextWire(lastWireUsed, connections)];
+        }
+
+        if (nextWire == {})
+        {
+            if (wireValue == "")
+            {
+                definition.wires[wireIndex].feedback = "(error)";
+                definition.wires[wireIndex].star = " ";
+                definition.wires[wireIndex].visible = false;
+            }
+            else
+            {
+                definition.wires[wireIndex].feedback = "(manual)";
+                definition.wires[wireIndex].star = " ";
+                definition.wires[wireIndex].manual = true;
+                definition.wires[wireIndex].visible = true;
+            }
+
+            return definition;
+        }
+
+        const fromSplice = startsWith(connections.wires[nextWire].from.ref, getGlobalVariable(context, "wireSplicePrefix", "SP")) ? " (splice)" : "";
+        const toSplice = startsWith(connections.wires[nextWire].to.ref, getGlobalVariable(context, "wireSplicePrefix", "SP")) ? " (splice)" : "";
+
+        definition.wires[wireIndex].fromSplice = fromSplice == "" ? -1 : 0;
+        definition.wires[wireIndex].toSplice = toSplice == "" ? -1 : 0;
+        definition.wires[wireIndex].id = nextWire;
+        definition.wires[wireIndex].from = connections.wires[nextWire].from.ref ~ "/" ~ connections.wires[nextWire].from.pin ~ fromSplice;
+        definition.wires[wireIndex].to = connections.wires[nextWire].to.ref ~ "/" ~ connections.wires[nextWire].to.pin ~ toSplice;
+        definition.wires[wireIndex].visible = true;
+        definition.wires[wireIndex].manual = false;
+        definition.wires[wireIndex].feedback = " ";
+    }
+
+    return definition;
+}
+
+function arrayParameterReordered(oldDefinition is map, definition is map)
+{
+    var oldWireIds = [];
+    var newWireIds = [];
+    var result = false;
+
+    for (var wires in oldDefinition.wires)
+        oldWireIds = append(oldWireIds, wires.id);
+
+    for (var wires in definition.wires)
+        newWireIds = append(newWireIds, wires.id);
+
+    if (size(deduplicate(oldWireIds)) != size(newWireIds)) // check for added wire with possible duplicate
+        return false;
+
+    for (var i = 0; i < size(oldWireIds); i += 1)
+        if (oldWireIds[i] != newWireIds[i] && isIn(oldWireIds[i], newWireIds))
+        {
+            result = true;
+            break;
+        }
+
+    return result;
+}
+
+function getEditingLogicClipOrder(context is Context, definition is map, wireIndex is number)
+{
+    const pinData = getPins(context, makeId(definition.featureId), definition);
+
+    const routeStart = [evEdgeTangentLine(context, {
+                    "edge" : qEntityFilter(qCreatedBy(pinData[definition.wires[wireIndex].id].from.pinId), EntityType.EDGE),
+                    "parameter" : 1
+                })];
+
+    // clipList >> getClipPaths >> returns clipOrder
+    const clipList = getClipList(context, definition, {}, {}, definition.wires[wireIndex].id, wireIndex, []); // returns clips and bundles
+
+    // getClipOrder >> getNextClip >> getClipFlipStatus
+    return getClipOrder(context, definition, clipList, routeStart, wireIndex, true);
+}
+
+function getNextWire(index is number, wires is map) returns number
+{
+    const wireCount = size(wires.connected);
+
+    for ( ; index < wireCount; index += 1)
+        if (!wires.connected[index])
+            return index;
+
+    for (index = 0; index < wireCount; index += 1)
+        if (!wires.connected[index])
+            return index;
+
+    return 0;
+}
+
+function getConnectionData(context is Context) returns map
+{
+    const data = getData(context, "wires");
+
+    if (data == {})
+        return { "wires" : {}, "order" : [], "connected" : [] };
+
+    var connected = makeArray(size(data.order), false);
+
+    for (var i, wireId in data.order)
+        if (data[wireId].length > 0 * meter)
+            connected[i] = true;
+
+    return { "wires" : data, "order" : data.order, "connected" : connected };
+}
+
+function getCableBendRadius(context is Context, diameter is ValueWithUnits, wireIds is map, pinData is map)
+{
+    var minBendRadius = 0 * meter;
+
+    const wireBendFactor = getGlobalVariable(context, "wireBendFactor", 0);
+
+    if (wireBendFactor == 0)
+    {
+        for (var wireId in wireIds.wires)
+            if (pinData[wireId].bend != undefined && pinData[wireId].bend > minBendRadius)
+                minBendRadius = pinData[wireId].bend;
+    }
+    else
+        minBendRadius = wireBendFactor * diameter;
+
+    return minBendRadius;
+}
+
+function getLength(context is Context, definition is map, wireData is map)
+{
+    const lengthPrecision = getGlobalVariable(context, "wireLengthPrecision", 0 * meter);
+    const measureType = getGlobalVariable(context, "wireLengthMeasurement", "Strip");
+    const stubLength = wireData.from.stub + wireData.to.stub;
+    const stripLength = wireData.from.strip + wireData.to.strip;
+
+    var lengthAdjustment = measureType == "Strip" ? wireData.from.strip + wireData.to.strip : -wireData.from.stub - wireData.to.stub;
+
+    const wireEntities = qHasAttributeWithValueMatching("wireSegment", {
+                "wireId" : wireData.wireId
+            });
+
+    var cableEntities = qNothing();
+
+    if (definition.cable)
+    {
+        cableEntities = qHasAttributeWithValueMatching("wireSegment", {
+                    "wireId" : definition.wires[0].id,
+                    "section" : "cable"
+                });
+
+        if (definition.stripFirst == StripFirst.CABLE && definition.stripSecond == StripSecond.CABLE)
+            lengthAdjustment = measureType == "Strip" ? wireData.from.stub + wireData.from.strip + wireData.to.stub + wireData.to.strip : 0 * meter;
+
+        else if (definition.stripFirst == StripFirst.CABLE && definition.stripSecond != StripSecond.CABLE)
+            lengthAdjustment = measureType == "Strip" ? wireData.from.stub + wireData.from.strip + wireData.to.strip : -wireData.to.stub;
+
+        else if (definition.stripFirst != StripFirst.CABLE && definition.stripSecond == StripSecond.CABLE)
+            lengthAdjustment = measureType == "Strip" ? wireData.from.strip + wireData.to.stub + wireData.to.strip : -wireData.from.stub;
+    }
+
+    const length = evLength(context, {
+                    "entities" : qUnion(wireEntities, cableEntities),
+                }) + lengthAdjustment;
+
+    if (lengthPrecision == 0 * meter)
+        return length;
+
+    var roundedLength = round(length, lengthPrecision);
+
+    if (roundedLength < length)
+        roundedLength += lengthPrecision;
+
+    return roundedLength;
+}
+
+function getPins(context is Context, id is Id, definition is map) returns map
+{
+    const fromToData = getData(context, "wires");
+    const pinData = getData(context, "refs");
+    const wireLengthUnits = getGlobalVariable(context, "wireLengthUnits", millimeter);
+    const wireBendFactor = getGlobalVariable(context, "wireBendFactor", 0);
+    var wireData = {};
+    var errors = "";
+    var inputError = "";
+
+    for (var i = 0; i < size(definition.wires); i += 1)
+    {
+        if (definition.wires[i].visible) // wire is valid
+        {
+            const wireId = definition.wires[i].id;
+            var wire = fromToData[wireId];
+
+            var fromData;
+            var toData;
+            var fromRef;
+            var toRef;
+            var fromPin;
+            var toPin;
+
+            if (definition.wires[i].manual)
+            {
+                try silent
+                {
+                    fromData = getAttribute(context, {
+                                "entity" : definition.wires[i].fromPin,
+                                "name" : "pinData"
+                            });
+
+                    toData = getAttribute(context, {
+                                "entity" : definition.wires[i].toPin,
+                                "name" : "pinData"
+                            });
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (fromData == undefined || toData == undefined)
+                {
+                    errorWarning(context, id, "Only predefined connection references may be selected.");
+                    return {};
+                }
+
+                fromRef = pinData[fromData.ref];
+                fromPin = fromRef[fromData.pin];
+                toRef = pinData[toData.ref];
+                toPin = toRef[toData.pin];
+
+                if (definition.wires[i].geometry == WireGeometry.AREA && !isArea(definition.wires[i].area))
+                {
+                    inputError ~= (inputError == "" ? "" : ", ") ~ definition.wires[i].id;
+                    continue;
+                }
+
+                const wireGeometry = getWireGeometry({
+                            "wireDiameter" : definition.wires[i].geometry == WireGeometry.DIAMETER ? definition.wires[i].diameter.value : undefined,
+                            "wireArea" : definition.wires[i].geometry == WireGeometry.AREA ? definition.wires[i].area.value : undefined,
+                            "wireGauge" : definition.wires[i].geometry == WireGeometry.GAUGE ? stringToNumber(replace(definition.wires[i].gauge, "G", "")) : undefined,
+                            "wireInsulation" : definition.wires[i].sheathing.value,
+                            "manual" : true
+                        }, meter);
+
+                wire = {
+                        "from" : { "ref" : fromData.ref, "pin" : fromData.pin },
+                        "to" : { "ref" : toData.ref, "pin" : toData.pin },
+                        "color" : definition.wires[i].color,
+                        "diameter" : wireGeometry.outerDiameter,
+                        "core" : wireGeometry.coreDiameter,
+                        "bend" : wireBendFactor * wireGeometry.outerDiameter,
+                        "mass" : wireGeometry.mass,
+                        "length" : 0 * meter
+                    };
+            }
+            else
+            {
+                if (wire == undefined) // wires removed from CSV file
+                {
+                    errors ~= (errors == "" ? "" : ", ") ~ definition.wires[i].id;
+                    continue;
+                }
+
+                fromRef = pinData[wire.from.ref];
+                fromPin = fromRef[wire.from.pin];
+                toRef = pinData[wire.to.ref];
+                toPin = toRef[wire.to.pin];
+
+                if (fromPin == false)
+                    errors ~= (errors == "" ? "" : ", ") ~ definition.wires[i].from;
+
+                if (toPin == false)
+                    errors ~= (errors == "" ? "" : ", ") ~ definition.wires[i].to;
+
+                if (fromPin == false || toPin == false)
+                    continue;
+            }
+
+            wire.wireId = wireId;
+            wire.from = mergeMaps(wire.from, { "refId" : fromRef.assigned, "pinId" : fromPin, "strip" : fromRef.strip, "stub" : fromRef.stub, "splice" : fromRef.splice });
+            wire.to = mergeMaps(wire.to, { "refId" : toRef.assigned, "pinId" : toPin, "strip" : toRef.strip, "stub" : toRef.stub, "splice" : toRef.splice });
+            wireData = mergeMaps(wireData, { (definition.wires[i].id) : wire });
+        }
+    }
+
+    if (errors != "")
+        errorWarning(context, id, "From-to references missing: " ~ errors);
+
+    if (inputError != "")
+        errorWarning(context, id, "Area value for wire(s) " ~ inputError ~ " must have squared units.");
+
+    setData(context, [wireData], "wires");
+
+    return wireData;
+}
+
+function getCablePoints(context is Context, definition is map, cable is map, pinData is map) returns map
+{
+    cable.start = getAveragePinLocation(context, definition, pinData, true);
+    cable.end = getAveragePinLocation(context, definition, pinData, false);
+
+    if (definition.cableOffset["c0"] == undefined)
+        cable.startOffset = cable.start.zAxis * cable.diameter * 4;
+    else
+        cable.startOffset = vector(definition.cableOffset["c0"]);
+
+    if (definition.cableOffset["c1"] == undefined)
+        cable.endOffset = -cable.end.zAxis * cable.diameter * 4;
+    else
+        cable.endOffset = vector(definition.cableOffset["c1"]);
+
+    var rotation = { "x0" : 0 * degree, "x1" : 0 * degree, "y0" : 0 * degree, "y1" : 0 * degree, "z0" : 0 * degree, "z1" : 0 * degree };
+
+    for (var key, _ in rotation)
+    {
+        if (definition.cableOffset[key] != undefined)
+            rotation[key] = definition.cableOffset[key];
+    }
+
+    const cableStartRotation = rotationMatrix3d(Z_DIRECTION, rotation["z0"]) * rotationMatrix3d(Y_DIRECTION, rotation["y0"]) * rotationMatrix3d(X_DIRECTION, rotation["x0"]) * cable.start.zAxis;
+    const cableEndRotation = rotationMatrix3d(Z_DIRECTION, rotation["z1"]) * rotationMatrix3d(Y_DIRECTION, rotation["y1"]) * rotationMatrix3d(X_DIRECTION, rotation["x1"]) * cable.end.zAxis;
+
+    cable.startVector = line(cable.start.origin + cable.startOffset, cableStartRotation);
+    cable.endVector = line(cable.end.origin + cable.endOffset, cableEndRotation);
+    cable.simplifiedStartVector = line(cable.start.origin, cable.start.zAxis);
+    cable.simplifiedEndVector = line(cable.end.origin, cable.end.zAxis);
+
+    return cable;
+}
+
+function getAveragePinLocation(context is Context, definition is map, wireData is map, start is boolean) returns map
+{
+    var cSys;
+    var pinArray = [];
+    const wireEnd = start ? "from" : "to";
+    const stripEnd = start ? definition.stripFirst == StripFirst.CABLE : definition.stripSecond == StripSecond.CABLE;
+
+    for (var wire in definition.wires)
+    {
+        var spliceCount = start ? wire.fromSplice : wire.toSplice;
+        spliceCount = spliceCount == -1 ? 0 : spliceCount % evaluateQueryCount(context, qCreatedBy(wireData[wire.id][wireEnd].pinId, EntityType.EDGE));
+
+        pinArray = append(pinArray, qCreatedBy(wireData[wire.id][wireEnd].pinId, EntityType.EDGE)->qNthElement(spliceCount)->qEdgeVertex(false));
+    }
+
+    if (stripEnd) // use all pins on connector regardless of connections
+    {
+        var allPins = [];
+        var refArray = wireData[keys(wireData)[0]][wireEnd].refId;
+
+        if (refArray == []) // changed from false
+            refArray = [resize(wireData[keys(wireData)[0]][wireEnd].pinId, size(wireData[keys(wireData)[0]][wireEnd].pinId) - 1)];
+
+        for (var ref in refArray)
+        {
+            allPins = append(allPins, qCreatedBy(ref, EntityType.BODY)->qFlattenedCompositeParts()->qBodyType(BodyType.WIRE)->qSketchFilter(SketchObject.NO));
+            allPins = append(allPins, qHasAttributeWithValue("refId", ref));
+        }
+
+        for (var pin in evaluateQuery(context, qUnion(allPins)))
+            pinArray = append(pinArray, qEdgeVertex(pin->qOwnedByBody(EntityType.EDGE), false));
+    }
+
+    const firstPin = evEdgeTangentLine(context, {
+                "edge" : qAdjacent(pinArray[0], AdjacencyType.VERTEX, EntityType.EDGE),
+                "parameter" : 1
+            });
+
+    cSys = coordSystem(firstPin.origin, perpendicularVector(firstPin.direction), firstPin.direction);
+
+    const midPoint = evBox3d(context, {
+                "topology" : qUnion(pinArray),
+                "cSys" : cSys
+            });
+
+    cSys.origin = toWorld(cSys, box3dCenter(midPoint));
+    cSys.zAxis = start ? cSys.zAxis : -cSys.zAxis;
+
+    return cSys;
+}
+
+function getIntermediatePoints(context is Context, curveId is Id, triadPoints is array)
+{
+    var previous = 0;
+    var parameters = [];
+
+    for (var i = 0; i < size(triadPoints); i += 1)
+    {
+        const triadLocation = evDistance(context, {
+                    "side0" : qCreatedBy(curveId, EntityType.EDGE),
+                    "side1" : triadPoints[i]
+                });
+
+        parameters = append(parameters, (triadLocation.sides[0].parameter - previous) / 2 + previous);
+        previous = triadLocation.sides[0].parameter;
+    }
+
+    parameters = append(parameters, (1 - previous) / 2 + previous);
+
+    var intermediatePoints = [];
+
+    const intermediateLines = evEdgeTangentLines(context, {
+                "edge" : qCreatedBy(curveId, EntityType.EDGE),
+                "parameters" : parameters
+            });
+
+    for (var intermediateLine in intermediateLines)
+        intermediatePoints = append(intermediatePoints, intermediateLine.origin);
+
+    return intermediatePoints;
+}
+
+function getTriadPoints(splinePoints is array, triadPoints)
+{
+    if (triadPoints != undefined)
+        for (var point in triadPoints)
+            splinePoints = append(splinePoints, vector(point));
+
+    return splinePoints;
+}
+
+function getBendRadius(context is Context, id is Id, definition is map, minBendRadius is ValueWithUnits, show is boolean) returns boolean
+{
+    if (minBendRadius == 0 * meter)
+        return false;
+
+    var violation = false;
+    const wire = qCreatedBy(id, EntityType.EDGE);
+
+    for (var edge in evaluateQuery(context, wire))
+    {
+        var samples = 1;
+
+        const wireGeometry = evCurveDefinition(context, {
+                    "edge" : edge
+                });
+
+        if (wireGeometry is Line)
+            continue;
+
+        else if (wireGeometry is Circle && wireGeometry.radius >= minBendRadius)
+            continue;
+
+        else
+            samples = floor(evLength(context, {
+                                "entities" : edge
+                            }) / (minBendRadius / 8));
+
+        var curveSamples;
+
+        while (curveSamples == undefined)
+        {
+            try silent
+            {
+                curveSamples = evEdgeCurvatures(context, {
+                            "edge" : edge,
+                            "parameters" : range(0, 1, clamp(samples, 3, 999))
+                        });
+            }
+            catch
+            {
+                samples = floor(samples * 0.9);
+            }
+        }
+
+        var minRadius = 1e6 * meter;
+        var minPoint;
+
+        for (var sample in curveSamples)
+            if (minRadius > 1 / sample.curvature)
+            {
+                minRadius = 1 / sample.curvature;
+                minPoint = sample.frame;
+            }
+
+        if (minRadius > minBendRadius)
+            continue;
+
+        addDebugEntities(context, edge, DebugColor.RED);
+
+        if (show)
+        {
+            addDebugArrow(context, minPoint.origin + minPoint.xAxis * minBendRadius, minPoint.origin, 2 * millimeter, DebugColor.RED);
+            errorInfo(context, id, "Minimum bend radius (" ~ roundToPrecision(minBendRadius / definition.wireLengthUnits, 2) ~ definition.units ~ ") = " ~ roundToPrecision(minRadius / definition.wireLengthUnits, 2) ~ definition.units);
+        }
+
+        violation = true;
+    }
+
+    return violation;
+}
+
+function packSplinePoints(context is Context, definition is map, cable is map, wireId is string, start is boolean, wireStart is map, wireEnd is map, splinePoints is array)
+{
+    const wire = argIn(wireId, cable.packing);
+    const center = vector(wire.center[0], wire.center[1], 0) * meter;
+
+    if (start && definition.stripFirst != StripFirst.CABLE)
+    {
+        var cSys = coordSystem(plane(wireEnd.origin, wireEnd.direction));
+
+        if (definition.startTwist == MateConnectorAxisType.PLUS_Y)
+            cSys.xAxis = -cross(cSys.zAxis, cSys.xAxis);
+        else if (definition.startTwist == MateConnectorAxisType.MINUS_X)
+            cSys.xAxis = -cSys.xAxis;
+        else if (definition.startTwist == MateConnectorAxisType.MINUS_Y)
+            cSys.xAxis = cross(cSys.zAxis, cSys.xAxis);
+
+        splinePoints[size(splinePoints) - 1] = toWorld(cSys, center);
+    }
+    else if (definition.stripSecond != StripSecond.CABLE)
+    {
+        var cSys = coordSystem(plane(wireStart.origin, wireStart.direction));
+
+        if (definition.endTwist == MateConnectorAxisType.PLUS_Y)
+            cSys.xAxis = -cross(cSys.zAxis, cSys.xAxis);
+        else if (definition.endTwist == MateConnectorAxisType.MINUS_X)
+            cSys.xAxis = -cSys.xAxis;
+        else if (definition.endTwist == MateConnectorAxisType.MINUS_Y)
+            cSys.xAxis = cross(cSys.zAxis, cSys.xAxis);
+
+        splinePoints[0] = toWorld(cSys, center);
+    }
+
+    return splinePoints;
+}
+
+function setPinData(context is Context, id is Id, definition is map, wireNumber is number, wireData is map)
+{
+    const manual = definition.wires[wireNumber].manual;
+    const wireId = keys(wireData)[0];
+
+    const fromCount = wireData[wireId].from.splice ? definition.wires[wireNumber].fromSplice % evaluateQueryCount(context, qCreatedBy(wireData[wireId].from.pinId, EntityType.EDGE)) : 0;
+    const toCount = wireData[wireId].to.splice ? definition.wires[wireNumber].toSplice % evaluateQueryCount(context, qCreatedBy(wireData[wireId].to.pinId, EntityType.EDGE)) : 0;
+
+    const fromPin = manual ? definition.wires[wireNumber].fromPin : qCreatedBy(wireData[wireId].from.pinId, EntityType.BODY)->qNthElement(fromCount);
+    const toPin = manual ? definition.wires[wireNumber].toPin : qCreatedBy(wireData[wireId].to.pinId, EntityType.BODY)->qNthElement(toCount);
+
+    if (!definition.cable || definition.stripFirst != StripFirst.CABLE) // wire or stripped cable end
+        copyWireBody(context, id + "from", fromPin,
+            getWireTags(wireData, wireId, { "section" : "start", "butt" : true })
+            );
+
+    if (!definition.cable || definition.stripSecond != StripSecond.CABLE)
+        copyWireBody(context, id + "to", toPin,
+            getWireTags(wireData, wireId, { "section" : "end", "butt" : true })
+            );
+
+    try silent
+    {
+        wireData[wireId].from.vector = evEdgeTangentLine(context, {
+                    "edge" : fromPin->qOwnedByBody(EntityType.EDGE),
+                    "parameter" : 1
+                });
+    }
+
+    try silent
+    {
+        wireData[wireId].to.vector = evEdgeTangentLine(context, {
+                    "edge" : toPin->qOwnedByBody(EntityType.EDGE),
+                    "parameter" : 1
+                });
+
+        wireData[wireId].to.vector.direction *= -1; // flip direction of end derivative
+    }
+
+    return { (wireId) : wireData[wireId] };
+}
+
+// clip management functions
+
+function getClipList(context is Context, definition is map, wireData is map, wireIds is map, wireId is string, wireIndex is number, point)
+{
+    var wire = wireIndex;
+
+    if (definition.cable || definition.wires[wire].follow)
+        wire = 0;
+
+    const clips = definition.wires[wire].clips.subqueries;
+
+    var bundlePaths = [];
+    var clipPaths = [];
+    var parentIds = [];
+    var parentWireIds = [];
+    const selectedEdge = canBeVector(point) ? getEdges(context, getClosest(definition.wires[wire].clips, point)) : qNothing();
+
+    // sort clips and bundles
+    for (var edge in clips)
+    {
+        // convert user selected curves to edges
+        edge = getEdges(context, edge);
+
+        if (isQueryEmpty(context, edge)) // edge has been suppressed or deleted and cannot be found (red in UI)
+            continue;
+
+        const entityId = lastModifyingOperationId(context, edge);
+
+        if (definition.bundle && entityId[1] == "wire")
+        {
+            if (!isIn(entityId[2], parentWireIds))
+            {
+                parentIds = append(parentIds, subArray(entityId, 0, 3));
+                parentWireIds = append(parentWireIds, entityId[2]);
+            }
+
+            bundlePaths = append(bundlePaths, edge);
+        }
+        else
+            clipPaths = append(clipPaths, edge);
+    }
+
+    const clipArray = getClipPaths(context, definition, wireData, wireIds, wireId, wire, wireIndex, clipPaths);
+    const bundleArray = getBundlePaths(context, definition, wireData, wireIds, wireId, wire, parentIds, bundlePaths);
+
+    return concatenateArrays([clipArray, bundleArray]);
+}
+
+function getClipOrder(context is Context, definition is map, clipList is array, wireRoute is array, wireIndex is number, clipOrder is boolean)
+{
+    var order = [];
+
+    for (var clip, _ in clipList)
+    {
+        var lastOrigin = definition.wires[wireIndex].points["c" ~ clip + (definition.stripFirst != StripFirst.CLIP ? 1 : 0)];
+
+        try
+        {
+            if (lastOrigin == undefined || lastOrigin == [])
+                lastOrigin = last(wireRoute).origin;
+            else
+                lastOrigin = vector(last(lastOrigin));
+        }
+        catch
+        {
+            lastOrigin = vector(0, 0, 0) * meter;
+        }
+
+        const nextClip = getNextClip(context, definition, clipList, lastOrigin, clip, wireIndex);
+
+        order = append(order, nextClip[0]);
+
+        var wireIn = clipList[nextClip[0]][1][nextClip[1]];
+        var wireOut = clipList[nextClip[0]][1][1 - nextClip[1]];
+
+        if (nextClip[1] == 1) //flipped
+        {
+            wireIn.direction *= -1;
+            wireOut.direction *= -1;
+        }
+
+        wireRoute = append(wireRoute, wireIn);
+        wireRoute = append(wireRoute, wireOut);
+
+        clipList[nextClip[0]][2] = nextClip[1]; // clip has been used
+    }
+
+    return clipOrder ? order : wireRoute;
+}
+
+function getClipEquivalent(context is Context, definition is map, point is Vector, wire is number)
+{
+    // called from manipulator change so no clip data available so it must be rebuilt
+    const clips = getClipList(context, definition, {}, {}, definition.wires[wire].id, wire, point);
+
+    for (var clip in clips) // find selected clip
+    {
+        const chain = getAttribute(context, {
+                        "entity" : qOwnerBody(clip[0] as Query),
+                        "name" : "wireSegment"
+                    }).chain;
+
+        if (!isQueryEmpty(context, getClosest(chain as Query, point)))
+            for (var i, flipData in definition.wires[wire].flipData) // find user selections
+                if (!isQueryEmpty(context, qIntersection(flipData as Query, chain as Query)))
+                    return { "path" : chain, "index" : i };
+    }
+
+    return {};
+}
+
+function getEdges(context is Context, entity is Query)
+{
+    return isQueryEmpty(context, qEntityFilter(entity, EntityType.EDGE)) ? qOwnedByBody(entity, EntityType.EDGE) : entity;
+}
+
+function getClipFlipStatus(context is Context, definition is map, clip is Query, wire is number)
+{
+    var flip = -1;
+    const edges = getEdges(context, clip);
+
+    if (definition.wires[wire].flipData != undefined)
+        for (var flipData in definition.wires[wire].flipData)
+        {
+            try silent
+            {
+                if (!isQueryEmpty(context, flipData as Query))
+                {
+                    const point = evEdgeTangentLine(context, {
+                                    "edge" : getEdges(context, flipData as Query),
+                                    "parameter" : 0.5
+                                }).origin;
+
+                    if (!isQueryEmpty(context, getClosest(edges, point)))
+                    {
+                        flip = flipData.flip;
+                        break;
+                    }
+                }
+            }
+        }
+
+    return flip;
+}
+
+function getNextClip(context is Context, definition is map, clips is array, point is Vector, clip is number, wire is number)
+{
+    var closest = makeArray(2);
+    var shortestDistance = 1000 * meter;
+
+    for (var i = definition.wires[wire].useClipOrder ? clip : 0; i < size(clips); i += 1)
+    {
+        const axes = clips[i][1]; // evEdgeTangentLine of clips[i][0]
+
+        for (var j = 0; j < 2; j += 1)
+        {
+            if (clips[i][2] != -1) // clip already used
+                continue;
+
+            const distance = norm(point - axes[j].origin);
+
+            if (distance < shortestDistance)
+            {
+                shortestDistance = distance;
+                closest = [i, j];
+            }
+        }
+
+        if (definition.wires[wire].useClipOrder)
+            break;
+    }
+
+    const flip = getClipFlipStatus(context, definition, clips[closest[0]][0], wire);
+
+    if (flip != -1)
+        closest[1] = flip;
+
+    return closest;
+}
+
+function getClipPaths(context is Context, definition is map, wireData is map, wireIds is map, wireId is string, wire is number, wireIndex is number, edges is array)
+{
+    if (edges == [])
+        return [];
+
+    const featureId = [definition.featureId, definition.old != undefined ? "oldWire" : "wire", wireId] as Id;
+    const edgeChains = getEdgeChains(context, edges);
+
+    var clips = [];
+
+    for (var c, chain in edgeChains)
+    {
+        try silent // ignore coincident clip selections
+        {
+            const clipId = featureId + "clip" + c;
+            const clip = qCreatedBy(clipId, EntityType.BODY);
+
+            opSplineThroughEdges(context, clipId, {
+                        "edges" : chain
+                    });
+
+            const attributes = {
+                    "wireId" : definition.wires[wireIndex].id,
+                    "section" : definition.cable && wire == 0 ? "cable" : "wire",
+                    "cableId" : definition.cable ? wireIds.cable : undefined,
+                    "cableWireIds" : definition.cable ? wireIds.wires : undefined,
+                    "clip" : true,
+                    "chain" : chain // added to recall original edge IDs
+                };
+
+            setAttribute(context, {
+                        "entities" : clip,
+                        "name" : "wireSegment",
+                        "attribute" : attributes
+                    });
+
+            clips = append(clips, [clip, evEdgeTangentLines(context, {
+                                "edge" : qOwnedByBody(clip, EntityType.EDGE),
+                                "parameters" : [0, 1] }), -1]);
+        }
+        catch
+        {
+            errorWarning(context, makeId(definition.featureId), "Clip selections can not be coincident.");
+        }
+    }
+
+    return clips;
+}
+
+function getBundlePaths(context is Context, definition is map, wireData is map, wireIds is map, wireId is string, wire is number, parentIds is array, edges is array)
+{
+    if (edges == [])
+        return [];
+
+    if (definition.cable || definition.wires[wire].follow)
+        wire = 0;
+
+    const featureId = [definition.featureId, "wire", wireId, "bundle"] as Id;
+    var bundlePaths = [];
+
+    for (var parentId in parentIds)
+    {
+        const parentEdges = qCreatedBy(parentId, EntityType.EDGE);
+
+        if (isQueryEmpty(context, qIntersection(parentEdges, qUnion(edges))))
+            continue;
+
+        var routePath;
+        const routePaths = constructPaths(context, qCreatedBy(parentId, EntityType.EDGE), {}); // get all parent edges in sequence
+
+        for (var route in routePaths)
+            if (!isQueryEmpty(context, qIntersection(qUnion(route.edges), qUnion(edges))))
+            {
+                routePath = route; // to work around wire packing disconnects
+                break;
+            }
+
+        var minSegment = size(routePath.edges);
+        var maxSegment = 0;
+
+        for (var i = 0; i < size(routePath.edges); i += 1)
+            if (!isQueryEmpty(context, qIntersection(routePath.edges[i], qUnion(edges))))
+            {
+                if (i < minSegment)
+                    minSegment = i;
+
+                if (i > maxSegment)
+                    maxSegment = i;
+            }
+
+        var intermediateEdges = [];
+
+        for (var i = minSegment; i < maxSegment + 1; i += 1)
+            for (var j = 0; j < size(evaluateQuery(context, parentEdges)); j += 1)
+                if (areQueriesEquivalent(context, qNthElement(parentEdges, j), qIntersection(qCreatedBy(parentId, EntityType.EDGE), routePath.edges[i])))
+                    intermediateEdges = append(intermediateEdges, qNthElement(parentEdges, j));
+
+        bundlePaths = append(bundlePaths, { "wireId" : parentId[2], "edges" : intermediateEdges });
+    }
+
+    var paths = [];
+    var bundleId;
+
+    for (var i, bundlePath in bundlePaths)
+    {
+        bundleId = featureId + i;
+
+        const bundleData = getAttribute(context, {
+                    "entity" : qOwnerBody(bundlePath.edges[0]),
+                    "name" : "wireSegment"
+                });
+
+        const parentData = getData(context, "wires")[bundleData.wireId];
+        const otherDiameter = bundleData.section == "cable" ? parentData.cable.diameter : parentData.diameter;
+
+        opSplineThroughEdges(context, bundleId + "splitSpline", {
+                    "edges" : qUnion(bundlePath.edges)
+                });
+
+        const splitSpline = qCreatedBy(bundleId + "splitSpline", EntityType.EDGE);
+
+        var startOffset = definition.wires[wire].bundleOffsets["c" ~ i ~ "bs"] == undefined ? 0 : definition.wires[wire].bundleOffsets["c" ~ i ~ "bs"];
+        var endOffset = definition.wires[wire].bundleOffsets["c" ~ i ~ "be"] == undefined ? 1 : definition.wires[wire].bundleOffsets["c" ~ i ~ "be"];
+
+        if (definition.wires[wire].edit && definition.wires[wire].editAction == EditAction.EDIT)
+        {
+            var manipulators = {};
+
+            const startOrigin = evEdgeTangentLine(context, {
+                        "edge" : bundlePath.edges[0],
+                        "parameter" : startOffset
+                    });
+
+            const endOrigin = evEdgeTangentLine(context, {
+                        "edge" : last(bundlePath.edges),
+                        "parameter" : endOffset
+                    });
+
+            manipulators["w" ~ wire ~ "c" ~ i ~ "bs"] = linearManipulator({
+                        "base" : startOrigin.origin,
+                        "direction" : startOrigin.direction,
+                        "style" : ManipulatorStyleEnum.TANGENTIAL,
+                        "offset" : 0 * meter
+                    });
+
+            manipulators["w" ~ wire ~ "c" ~ i ~ "be"] = linearManipulator({
+                        "base" : endOrigin.origin,
+                        "direction" : endOrigin.direction,
+                        "style" : ManipulatorStyleEnum.TANGENTIAL,
+                        "offset" : 0 * meter
+                    });
+
+            addManipulators(context, makeId(definition.featureId), manipulators);
+        }
+
+        var toKeep = 0;
+        var parameters = [];
+        const path = constructPath(context, qUnion(bundlePath.edges));
+
+        const startLength = evLength(context, {
+                    "entities" : bundlePath.edges[0]
+                });
+
+        const endLength = evLength(context, {
+                    "entities" : last(bundlePath.edges)
+                });
+
+        const splineLength = evLength(context, {
+                    "entities" : splitSpline
+                });
+
+        if (startOffset > 0)
+        {
+            if (path.flipped[0])
+                startOffset = 1 - startOffset;
+
+            if (startOffset != 0)
+            {
+                parameters = [startOffset * startLength / splineLength];
+                toKeep = 1;
+            }
+        }
+
+        if (endOffset < 1)
+        {
+            if (last(path.flipped))
+                endOffset = 1 - endOffset;
+
+            if (endOffset != 1)
+                parameters = append(parameters, (splineLength - endLength) / splineLength + endOffset * endLength / splineLength);
+        }
+
+        if (parameters != [])
+        {
+            opSplitEdges(context, bundleId + "splitStart", {
+                        "edges" : splitSpline,
+                        "parameters" : [parameters]
+                    });
+        }
+
+        opSplineThroughEdges(context, bundleId + "bundleSpline", {
+                    "edges" : qNthElement(splitSpline, toKeep)
+                });
+
+        const bundleSpline = qCreatedBy(bundleId + "bundleSpline", EntityType.EDGE);
+
+        opDeleteBodies(context, bundleId + "deleteSpline", {
+                    "entities" : splitSpline
+                });
+
+        const bundleDiameter = wireData == {} ? 0 * meter : getBundleDiameter(definition, otherDiameter, definition.cable ? wireData.cable.diameter : wireData.diameter);
+
+        const attributes = {
+                "wireId" : definition.wires[wire].id,
+                "section" : definition.cable && wire == 0 ? "cable" : "wire",
+                "cableId" : definition.cable ? wireIds.cable : undefined,
+                "cableWireIds" : definition.cable ? wireIds.wires : undefined,
+                "harness" : { "diameter" : bundleDiameter, "color" : definition.coveringColor, "parentId" : bundlePaths[i].wireId },
+                "covering" : true,
+                "chain" : qUnion(bundlePath.edges) // added to retrieve edge IDs
+            };
+
+        setAttribute(context, {
+                    "entities" : qOwnerBody(bundleSpline),
+                    "name" : "wireSegment",
+                    "attribute" : attributes
+                });
+
+        const startOrigin = evEdgeTangentLine(context, {
+                    "edge" : bundleSpline,
+                    "parameter" : 0
+                });
+
+        const endOrigin = evEdgeTangentLine(context, {
+                    "edge" : bundleSpline,
+                    "parameter" : 1
+                });
+
+        paths = append(paths, [bundleSpline, [startOrigin, endOrigin], -1]);
+    }
+
+    return paths;
+}
+
+function getBundleDiameter(definition is map, bundleDiameter is ValueWithUnits, wireDiameter is ValueWithUnits)
+{
+    if (definition.bundleOverride)
+        return definition.bundleOverrideDiameter;
+
+    const insulation = definition.bundleOverride ? 0 * meter : definition.covering;
+    const bundle = getBundlePacking([{ "diameter" : bundleDiameter }, { "diameter" : wireDiameter }]);
+
+    return 2 * (insulation + last(bundle).radius * meter);
+}
+
+function clipManipulators(context is Context, definition is map, clips is array, wire is number)
+{
+    if (definition.wires[wire].edit && definition.wires[wire].editAction == EditAction.EDIT && !definition.wires[wire].follow)
+    {
+        var manipulators = {};
+
+        for (var c, clip in clips)
+        {
+            const clipEdge = getEdges(context, clip[0]);
+
+            const clipPoint = evEdgeTangentLine(context, {
+                        "edge" : clipEdge,
+                        "parameter" : 0.5
+                    });
+
+            const lastClipSelected = definition.wires[wire].clip as Vector;
+
+            if (canBeVector(lastClipSelected) && !isQueryEmpty(context, getClosest(clip[0], lastClipSelected)))
+            {
+                var flip = getClipFlipStatus(context, definition, clipEdge, wire);
+
+                if (flip == -1)
+                    flip = clip[2];
+
+                manipulators["w" ~ wire ~ "c0f" ~ c] = flipManipulator({
+                            "base" : clipPoint.origin,
+                            "direction" : clipPoint.direction,
+                            "flipped" : flip == 0 ? false : true,
+                        });
+            }
+            else // Add curve selection point
+                manipulators["w" ~ wire ~ "c0d" ~ c] = pointsManipulator({ "points" : [clipPoint.origin], "index" : -1 });
+
+            addManipulators(context, makeId(definition.featureId), manipulators);
+        }
+    }
+}
+
