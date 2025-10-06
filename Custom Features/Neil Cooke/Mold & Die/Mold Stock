@@ -1,0 +1,317 @@
+FeatureScript 1324;
+import(path : "onshape/std/common.fs", version : "1324.0");
+icon::import(path : "f5986d03917c24b1a2650ef5", version : "be637c9758426ec1f7e720a8");
+
+annotation { "Feature Type Name" : "Mold stock", "Manipulator Change Function" : "offsetWalls", "Editing Logic Function" : "editValues", "Icon" : icon::BLOB_DATA, "Feature Type Description" : "Build stock around a Part to define the final core and cavity size." }
+export const moldStock = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Mold part", "Filter" : EntityType.BODY && BodyType.SOLID, "MaxNumberOfPicks" : 1 }
+        definition.part is Query;
+
+        annotation { "Name" : "Mold surfaces", "Filter" : EntityType.BODY && BodyType.SHEET }
+        definition.surfaces is Query;
+
+        annotation { "Name" : "Ejection direction", "Filter" : (EntityType.FACE && GeometryType.PLANE) || BodyType.MATE_CONNECTOR, "MaxNumberOfPicks" : 1 }
+        definition.direction is Query;
+
+        annotation { "Name" : "Flip ejection direction", "UIHint" : "OPPOSITE_DIRECTION" }
+        definition.flip is boolean;
+
+        annotation { "Name" : "Move to origin" }
+        definition.move is boolean;
+
+        annotation { "Name" : "Shrinkage (%)" }
+        isReal(definition.shrinkage, SHRINKAGE);
+
+        annotation { "Name" : "Create projected area" }
+        definition.area is boolean;
+
+        annotation { "Name" : "Height offset" }
+        isLength(definition.heightOffset, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+
+        annotation { "Name" : "Height total" }
+        isLength(definition.height, LENGTH_BOUNDS);
+        
+
+        annotation { "Name" : "Width offset" }
+        isLength(definition.widthOffset, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+
+        annotation { "Name" : "Width total" }
+        isLength(definition.width, LENGTH_BOUNDS);
+
+        annotation { "Name" : "Depth offset" }
+        isLength(definition.depthOffset, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+
+        annotation { "Name" : "Depth total" }
+        isLength(definition.depth, LENGTH_BOUNDS);
+
+        annotation { "Name" : "Recalculate absolute stock size", "UIHint" : UIHint.OPPOSITE_DIRECTION_CIRCULAR }
+        definition.recalc is boolean;
+
+        annotation { "Name" : "Fillet edges" }
+        definition.filletEdges is boolean;
+        
+        if (definition.filletEdges)
+        {
+            annotation { "Name" : "Radius" }
+            isLength(definition.radius, BLEND_BOUNDS);
+        }
+    }
+    {
+        if (definition.part.subqueries == [])
+            throw regenError("Select a solid part", ["part"]);
+        if (definition.direction.subqueries == [])
+            throw regenError("Select planar face or mate connector", ["direction"]);
+
+        var part = getPartSize(context, id, definition);
+
+        if (!tolerantEquals(definition.height, part.height + 2 * definition.heightOffset))
+        {
+            reportFeatureStatus(context, id, { "statusType" : "INFO", "statusEnum" : ErrorStringEnum.CUSTOM_ERROR, "statusMsg" : "Part size has changed - reclaculate absolute stock sizes.", "faultyParameters" : ["height", "width", "depth"] } as FeatureStatus);
+        }
+
+        var outline = newSketchOnPlane(context, id + "outline", { "sketchPlane" : part.plane });
+        skPolyline(outline, "outline", {
+                    "points" : [
+                            vector(part.stock.minCorner[0], part.stock.minCorner[1]),
+                            vector(part.stock.minCorner[0], part.stock.maxCorner[1]),
+                            vector(part.stock.maxCorner[0], part.stock.maxCorner[1]),
+                            vector(part.stock.maxCorner[0], part.stock.minCorner[1]),
+                            vector(part.stock.minCorner[0], part.stock.minCorner[1])] });
+        skSolve(outline);
+
+        opExtrude(context, id + "stock", {
+                    "entities" : qCreatedBy(id + "outline", EntityType.FACE),
+                    "direction" : part.plane.normal,
+                    "startBound" : BoundingType.BLIND,
+                    "startDepth" : part.height / 2 + definition.heightOffset,
+                    "endBound" : BoundingType.BLIND,
+                    "endDepth" : part.height / 2 + definition.heightOffset });
+
+        if (definition.filletEdges)
+        {
+            opFillet(context, id + "fillet", { "entities" : qNonCapEntity(id + "stock", EntityType.EDGE), "radius" : definition.radius });
+        }
+
+        var manipulators = {};
+        var topPlane = definition.flip && !definition.move ? part.bottomPlane : part.topPlane;
+
+        manipulators.top = linearManipulator({ "base" : topPlane.origin, "direction" : topPlane.normal, "offset" : definition.heightOffset, "style" : ManipulatorStyleEnum.SECONDARY, "minValue" : 0 * meter });
+        manipulators.width = linearManipulator({ "base" : part.widthPlane.origin, "direction" : part.widthPlane.normal, "offset" : definition.widthOffset, "minValue" : 0 * meter });
+        manipulators.depth = linearManipulator({ "base" : part.depthPlane.origin, "direction" : part.depthPlane.normal, "offset" : definition.depthOffset, "minValue" : 0 * meter });
+        addManipulators(context, id, manipulators);
+
+        if (definition.move)
+        {
+            definition.direction = qCapEntity(id + "stock", CapType.END, EntityType.FACE);
+            definition.flip = false;
+        }
+
+        if (definition.area)
+        {
+            var outlinePlane = evFaceTangentPlane(context, {
+                    "face" : qCapEntity(id + "stock", CapType.START, EntityType.FACE),
+                    "parameter" : vector(0.5, 0.5)
+                });
+
+            outlinePlane.normal *= -1;
+
+            opPlane(context, id + "outlinePlane", {
+                        "plane" : outlinePlane
+                    });
+
+            opCreateOutline(context, id + "outlineSurface", {
+                        "tools" : definition.part,
+                        "target" : qCreatedBy(id + "outlinePlane", EntityType.FACE) });
+        }
+
+        opDeleteBodies(context, id + "deleteBodies", { "entities" : qUnion([qCreatedBy(id + "outline"), qCreatedBy(id + "outlinePlane")]) });
+
+        setProps(context, id + "stock", definition);
+    });
+
+function getPartSize(context is Context, id is Id, definition is map) returns map
+{
+    var result = {};
+    var cSys;
+
+    try silent
+    {
+        cSys = evMateConnector(context, { "mateConnector" : definition.direction });
+        result.plane = plane(cSys);
+    }
+    catch
+    {
+        result.plane = evPlane(context, { "face" : definition.direction });
+        cSys = coordSystem(result.plane);
+    }
+
+    var stock = evBox3d(context, { "topology" : definition.part, "cSys" : cSys });
+
+    if (definition.move)
+    {
+        cSys.origin = toWorld(cSys, box3dCenter(stock));
+        cSys.zAxis *= definition.flip ? -1 : 1;
+        opTransform(context, id + "movePart", {
+                    "bodies" : qUnion([definition.part, definition.surfaces]),
+                    "transform" : (toWorld(WORLD_COORD_SYSTEM) * inverse(toWorld(cSys)))
+                });
+        cSys = WORLD_COORD_SYSTEM;
+        result.plane = plane(cSys);
+
+        stock = evBox3d(context, { "topology" : definition.part });
+    }
+
+    if (definition.shrinkage > 0)
+    {
+        opTransform(context, id + "shrinkage", {
+                    "bodies" : qUnion([definition.part, definition.surfaces]),
+                    "transform" : scaleUniformly(1 + definition.shrinkage / 100, toWorld(cSys, box3dCenter(stock)))
+                });
+
+        stock = evBox3d(context, { "topology" : definition.part, "cSys" : cSys });
+    }
+
+    var centerOffset = evDistance(context, { "side0" : toWorld(cSys, box3dCenter(stock)), "side1" : result.plane });
+    result.plane.origin = transform(centerOffset.sides[0].point - centerOffset.sides[1].point) * result.plane.origin;
+
+    result.width = stock.maxCorner[0] - stock.minCorner[0];
+    result.depth = stock.maxCorner[1] - stock.minCorner[1];
+    result.height = stock.maxCorner[2] - stock.minCorner[2];
+    var widthOrigin = toWorld(coordSystem(result.plane), vector(stock.maxCorner[0], (stock.maxCorner[1] + stock.minCorner[1]) / 2, 0 * meter));
+    var depthOrigin = toWorld(coordSystem(result.plane), vector((stock.maxCorner[0] + stock.minCorner[0]) / 2, stock.minCorner[1], 0 * meter));
+
+    result.widthPlane = plane(widthOrigin, widthOrigin - toWorld(cSys, box3dCenter(stock)));
+    result.depthPlane = plane(depthOrigin, depthOrigin - toWorld(cSys, box3dCenter(stock)));
+
+    result.topPlane = result.plane;
+    result.topPlane.origin = toWorld(cSys, box3dCenter(stock)) + result.plane.normal * result.height / 2;
+    result.bottomPlane = result.plane;
+    result.bottomPlane.origin = toWorld(cSys, box3dCenter(stock)) - result.plane.normal * result.height / 2;
+    result.bottomPlane.normal *= -1;
+
+    stock.maxCorner[0] += definition.widthOffset;
+    stock.minCorner[0] -= definition.widthOffset;
+    stock.maxCorner[1] += definition.depthOffset;
+    stock.minCorner[1] -= definition.depthOffset;
+
+    result.stock = stock;
+    return result;
+}
+
+export function editValues(context is Context, id is Id, oldDefinition is map, definition is map, isCreating is boolean) returns map
+{
+    var part = getPartSize(context, id, definition);
+
+    if (oldDefinition.shrinkage != definition.shrinkage ||
+        oldDefinition.part != definition.part ||
+        oldDefinition.direction != definition.direction ||
+        oldDefinition.recalc != definition.recalc)
+    {
+        definition.width = part.width + 2 * definition.widthOffset;
+        definition.depth = part.depth + 2 * definition.depthOffset;
+        definition.height = part.height + 2 * definition.heightOffset;
+        definition.recalc = false;
+    }
+
+    if (oldDefinition.widthOffset != definition.widthOffset)
+    {
+        definition.width = part.width + 2 * definition.widthOffset;
+    }
+
+    if (oldDefinition.width != definition.width)
+    {
+        if (definition.width < part.width)
+            definition.width = part.width;
+
+        definition.widthOffset = (definition.width - part.width) / 2;
+    }
+
+    if (oldDefinition.depthOffset != definition.depthOffset)
+    {
+        definition.depth = part.depth + 2 * definition.depthOffset;
+    }
+
+    if (oldDefinition.depth != definition.depth)
+    {
+        if (definition.depth < part.depth)
+            definition.depth = part.depth;
+
+        definition.depthOffset = (definition.depth - part.depth) / 2;
+    }
+
+    if (oldDefinition.heightOffset != definition.heightOffset)
+    {
+        definition.height = part.height + 2 * definition.heightOffset;
+    }
+
+    if (oldDefinition.height != definition.height)
+    {
+        if (definition.height < part.height)
+            definition.height = part.height;
+
+        definition.heightOffset = (definition.height - part.height) / 2;
+    }
+
+    return definition;
+}
+
+export function offsetWalls(context is Context, definition is map, newManipulators is map) returns map
+{
+    try
+    {
+        var heightOffset = newManipulators["top"].offset;
+        if (heightOffset < 0)
+            definition.flip = !definition.flip;
+        definition.heightOffset = abs(heightOffset);
+    }
+    try
+    {
+        var widthOffset = newManipulators["width"].offset;
+        definition.widthOffset = abs(widthOffset);
+    }
+    try
+    {
+        var depthOffset = newManipulators["depth"].offset;
+        definition.depthOffset = abs(depthOffset);
+    }
+
+    return definition;
+}
+
+function setProps(context is Context, id is Id, definition is map)
+{
+    setProperty(context, {
+                "entities" : qCreatedBy(id, EntityType.BODY),
+                "propertyType" : PropertyType.APPEARANCE,
+                "value" : color(0.8, 0.9, 0.7, 0.25) });
+    setProperty(context, {
+                "entities" : qCreatedBy(id, EntityType.BODY),
+                "propertyType" : PropertyType.NAME,
+                "value" : "Mold Stock" });
+    setAttribute(context, {
+                "entities" : definition.direction,
+                "attribute" : { "name" : "moldEjectionDirection", "flip" : definition.flip } });
+    setAttribute(context, {
+                "entities" : qCreatedBy(id, EntityType.BODY),
+                "attribute" : { "name" : "moldStock" } });
+    setAttribute(context, {
+                "entities" : definition.part,
+                "attribute" : { "name" : "moldPart" } });
+    setAttribute(context, {
+                "entities" : qNonCapEntity(id, EntityType.FACE),
+                "attribute" : { "name" : "moldStockSides" } });
+
+    if (definition.surfaces.subqueries != [])
+    {
+        setAttribute(context, {
+                    "entities" : definition.surfaces,
+                    "attribute" : { "name" : "moldPartingSurface" } });
+    }
+}
+
+const SHRINKAGE =
+{
+            (unitless) : [0, 0, 10]
+        } as RealBoundSpec;
